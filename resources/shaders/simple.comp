@@ -1,30 +1,57 @@
 #version 430
-
-layout( local_size_x = 32 ) in;
-
+ 
+layout( local_size_x = 1006 ) in;
+ 
 layout( push_constant ) uniform params {
   uint len;
 } PushConstant;
-
+ 
 layout(std430, binding = 0) buffer a 
 {
     float A[];
 };
-
-layout(std430, binding = 1) buffer b
+ 
+layout(std430, binding = 1) buffer Result
 {
-    float B[];
+    float result[];
 };
-
-layout(std430, binding = 2) buffer Sum
-{
-    float sum[];
-};
+ 
+shared float group_memory[1006];
 
 void main() 
 {
-    uint idx = gl_GlobalInvocationID.x;
-    if (idx < PushConstant.len) {
-        sum[idx] = A[idx] + B[idx];
+    const int idx = int(gl_LocalInvocationID.x);
+    const int catch_idx = int(gl_WorkGroupID) * (int(gl_WorkGroupSize.x) - 6) +  idx - 3;
+    if (catch_idx >= 0 && catch_idx < PushConstant.len) {
+        group_memory[idx] = A[catch_idx];
+    } else {
+        group_memory[idx] = 0;
     }
+
+    groupMemoryBarrier();
+    barrier();
+
+    if (idx >= 3 && idx <= (gl_WorkGroupSize.x - 1) - 3 ) {
+        float my_sum = 0;
+        const int start_index = idx - 3;
+        const int end_index = idx + 3;
+        for (int i = start_index; i <= end_index; ++i) {
+            my_sum += group_memory[i];
+        }
+        my_sum = my_sum / 7.0;
+        result[catch_idx] = my_sum;
+    }
+    
+    // without shared
+    
+    // int idx = int(gl_GlobalInvocationID.x);
+    // float my_sum = 0;
+    // const int start_index = max(idx - 3, 0);
+    // const int end_index = min(idx + 3, int(PushConstant.len) - 1);
+    // for (int i = start_index; i <= end_index; ++i) {
+    //     my_sum += A[i];
+    // }
+    // my_sum = my_sum / 7.0;
+    // result[idx] = my_sum;
+
 }

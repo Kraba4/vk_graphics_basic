@@ -43,15 +43,20 @@ private:
   
   etna::ComputePipeline m_pipeline;
 
-  etna::Buffer m_A, m_B, m_sum;
- 
+  etna::Buffer m_A, m_Result;
+
   void BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkPipeline a_pipeline);
 
-  void SetupSimplePipeline();
+  void SetupSimplePipeline(const std::vector<float>& values);
   void loadShaders();
   void CleanupPipeline();
-
+  
   void Cleanup();
+
+  std::vector<float> GetRandomValues(const uint32_t size, std::optional<uint32_t> seed = std::nullopt) const;
+  std::vector<float> SmoothValues(const std::vector<float>& values, const uint32_t smooth_window_size) const;
+  float SafeSumRange(const std::vector<float>& values, const int signed_index_begin, const int signed_index_end) const;
+  double SumOfSubtractions(const std::vector<float>& to_reduce, const std::vector<float>& to_substact) const;
 };
 
 

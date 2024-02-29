@@ -3,7 +3,7 @@
 
 int main()
 {
-  constexpr int LENGTH = 10;
+  constexpr int LENGTH = 10'000'000;
 
   std::shared_ptr<ICompute> app = std::make_unique<SimpleCompute>(LENGTH);
   if(app == nullptr)
@@ -11,7 +11,7 @@ int main()
     std::cout << "Can't create compute of specified type" << std::endl;
     return 1;
   }
-
+  
   app->InitVulkan(nullptr, 0, 0);
 
   app->Execute();
