@@ -19,8 +19,9 @@ layout(binding = 0, set = 0) uniform AppData
   UniformParams Params;
 };
 
-layout (binding = 1) uniform sampler2D shadowMap;
+layout (binding = 1, set = 0) uniform sampler2D shadowMap;
 
+const float PI = 3.14159265359;
 void main()
 {
   const vec4 posLightClipSpace = Params.lightMatrix*vec4(surf.wPos, 1.0f); // 
@@ -38,5 +39,18 @@ void main()
    
   vec3 lightDir   = normalize(Params.lightPos - surf.wPos);
   vec4 lightColor = max(dot(surf.wNorm, lightDir), 0.0f) * lightColor1;
-  out_fragColor   = (lightColor*shadow + vec4(0.1f)) * vec4(Params.baseColor, 1.0f);
+  
+  const float my_cos = max(dot(-Params.lightForward, lightDir.xyz), 0);
+  const float outer_cos = cos(Params.angles.y / 180.0 * PI);
+  const float inner_cos = max(cos(Params.angles.x / 180.0 * PI), outer_cos);
+
+  float light_force = (my_cos - outer_cos) / (inner_cos - outer_cos);
+
+  if (my_cos > inner_cos) {
+    light_force = 1.0;
+  } else if (my_cos < outer_cos) {
+    light_force = 0.0;
+  }
+  light_force = light_force * light_force; // looks better
+  out_fragColor   =  (light_force * lightColor*shadow + vec4(0.1f)) * vec4(Params.baseColor, 1.0f);
 }
