@@ -1,0 +1,29 @@
+#version 450
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+layout(binding=0) uniform sampler2D shadowMapSquare;
+layout(binding=1, rgba32f) uniform image2D shadowMapSquare2;
+
+void main() {
+    const ivec2 cord = ivec2(gl_GlobalInvocationID.xy);
+    const int half_size = 3;
+    const int left_x = max(cord.x - half_size, 0);
+    const int right_x = min(cord.x + half_size, int(gl_WorkGroupSize.x) * int(gl_NumWorkGroups.x) - 1);
+
+    const int up_y = max(cord.y - half_size, 0);
+    const int down_y = min(cord.y + half_size, int(gl_WorkGroupSize.y) * int(gl_NumWorkGroups.y) - 1);
+
+    highp float sum = 0.0;
+    highp float sum2 = 0.0;
+    for (int i = up_y; i <= down_y; ++i) {
+        for (int j = left_x; j <= right_x; ++j) {
+            highp vec4 texel = texelFetch(shadowMapSquare, ivec2(j, i), 0);
+            sum += texel.x;
+            sum2 += texel.x * texel.x;
+        }
+    }
+    const highp float elems = float((down_y - up_y + 1) * (right_x - left_x + 1));
+    sum /= elems;
+    sum2 /= elems;
+    imageStore(shadowMapSquare2, cord, vec4(sum, sum2, 0, 0));
+}

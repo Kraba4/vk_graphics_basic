@@ -47,9 +47,11 @@ private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
   etna::Image shadowMap;
+  etna::Image shadowMapSmoothed;
+  
   etna::Sampler defaultSampler;
   etna::Buffer constants;
-
+  bool m_VSM_activated = true;
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
   struct
@@ -76,8 +78,10 @@ private:
   void* m_uboMappedMem = nullptr;
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
+  etna::GraphicsPipeline m_VSM_material_Pipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
-  
+  etna::ComputePipeline m_smoothShadowMapPipeline {};
+
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
 

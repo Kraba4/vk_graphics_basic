@@ -10,8 +10,8 @@ layout (location = 0 ) in VS_OUT
 {
   vec3 wPos;
   vec3 wNorm;
-//   vec3 wTangent;
-//   vec2 texCoord;
+  // vec3 wTangent;
+  // vec2 texCoord;
 } surf;
 
 layout(binding = 0, set = 0) uniform AppData
@@ -19,7 +19,8 @@ layout(binding = 0, set = 0) uniform AppData
   UniformParams Params;
 };
 
-layout (binding = 1) uniform sampler2D shadowMap;
+// layout (binding = 1) uniform sampler2D shadowMap;
+layout (binding = 1) uniform sampler2D shadowMapSquare;
 
 void main()
 {
@@ -28,8 +29,15 @@ void main()
   const vec2 shadowTexCoord    = posLightSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);  // just shift coords from [-1,1] to [0,1]               
     
   const bool  outOfView = (shadowTexCoord.x < 0.0001f || shadowTexCoord.x > 0.9999f || shadowTexCoord.y < 0.0091f || shadowTexCoord.y > 0.9999f);
-  const float shadow    = ((posLightSpaceNDC.z < textureLod(shadowMap, shadowTexCoord, 0).x + 0.001f) || outOfView) ? 1.0f : 0.0f;
-
+  const float m1 = textureLod(shadowMapSquare, shadowTexCoord, 0).x;
+  const float m2 = textureLod(shadowMapSquare, shadowTexCoord, 0).y;
+  const float d = m2 - m1 * m1;
+  float shadow;
+  if (((posLightSpaceNDC.z < m1 + 0.001f) || outOfView)) {
+    shadow = 1.0f;
+  } else {
+    shadow = d / (d + (posLightSpaceNDC.z - m1) * (posLightSpaceNDC.z - m1));
+  }
   const vec4 dark_violet = vec4(0.59f, 0.0f, 0.82f, 1.0f);
   const vec4 chartreuse  = vec4(0.5f, 1.0f, 0.0f, 1.0f);
 
