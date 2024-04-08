@@ -34,7 +34,7 @@ void QuadRenderer::RecordCommands(vk::CommandBuffer cmdBuff, vk::Image targetIma
     });
   vk::DescriptorSet vkSet = set.getVkSet();
 
-  etna::RenderTargetState renderTargets(cmdBuff, m_rect, {{targetImage, targetImageView, false}}, {});
+  etna::RenderTargetState renderTargets(cmdBuff, m_rect, {{targetImage, targetImageView}}, {});
 
   cmdBuff.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline.getVkPipeline());
   cmdBuff.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_pipeline.getVkPipelineLayout(), 0, {vkSet}, {});
