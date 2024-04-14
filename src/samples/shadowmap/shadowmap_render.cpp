@@ -225,8 +225,6 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     vk::AccessFlags2(vk::AccessFlagBits2::eShaderSampledRead), vk::ImageLayout::eReadOnlyOptimal,
     vk::ImageAspectFlagBits::eColor);
 
-    etna::flush_barriers(a_cmdBuff);
-
     //// draw final scene to screen
     //
     {
