@@ -31,6 +31,14 @@ void SimpleShadowmapRender::AllocateResources()
     .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled
   });
 
+  fogMap = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width / 4, m_height / 4, 1},
+    .name = "fog_map",
+    .format = vk::Format::eR32G32B32A32Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage
+  });
+
   defaultSampler = etna::Sampler(etna::Sampler::CreateInfo{.name = "default_sampler"});
   constants = m_context->createBuffer(etna::Buffer::CreateInfo
   {
@@ -63,6 +71,7 @@ void SimpleShadowmapRender::DeallocateResources()
 {
   mainViewDepth.reset(); // TODO: Make an etna method to reset all the resources
   shadowMap.reset();
+  fogMap.reset();
   m_swapchain.Cleanup();
   vkDestroySurfaceKHR(GetVkInstance(), m_surface, nullptr);  
 
@@ -91,6 +100,7 @@ void SimpleShadowmapRender::loadShaders()
   etna::create_program("simple_material",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
   etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
+  etna::create_program("compute_fog", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/fog.comp.spv"});
 }
 
 void SimpleShadowmapRender::SetupSimplePipeline()
@@ -111,7 +121,8 @@ void SimpleShadowmapRender::SetupSimplePipeline()
         {
           .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
           .depthAttachmentFormat = vk::Format::eD32Sfloat
-        }
+        },
+      .depthConfig = {.depthCompareOp = vk::CompareOp::eEqual}
     });
   m_shadowPipeline = pipelineManager.createGraphicsPipeline("simple_shadow",
     {
@@ -121,6 +132,7 @@ void SimpleShadowmapRender::SetupSimplePipeline()
           .depthAttachmentFormat = vk::Format::eD16Unorm
         }
     });
+  m_fogMapPipeline = pipelineManager.createComputePipeline("compute_fog", {});
 }
 
 
@@ -169,15 +181,57 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     DrawSceneCmd(a_cmdBuff, m_lightMatrix, m_shadowPipeline.getVkPipelineLayout());
   }
 
+  //// draw scene in main image depth buffer
+  //
+  {
+    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height}, {}, {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
+
+    vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
+    DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_shadowPipeline.getVkPipelineLayout());
+  }
+  
+  //// draw to fogMap
+  //
+  {
+    etna::set_state(a_cmdBuff, mainViewDepth.get(), vk::PipelineStageFlagBits2::eComputeShader,
+      vk::AccessFlags2(vk::AccessFlagBits2::eShaderRead), vk::ImageLayout::eGeneral,
+      vk::ImageAspectFlagBits::eDepth);
+
+    etna::set_state(a_cmdBuff, fogMap.get(), vk::PipelineStageFlagBits2::eComputeShader,
+      vk::AccessFlags2(vk::AccessFlagBits2::eShaderWrite), vk::ImageLayout::eGeneral,
+      vk::ImageAspectFlagBits::eColor);
+
+    etna::flush_barriers(a_cmdBuff);
+
+    auto fogInfo = etna::get_shader_program("compute_fog");
+    auto set = etna::create_descriptor_set(fogInfo.getDescriptorLayoutId(0), a_cmdBuff,
+    {
+      etna::Binding {0, mainViewDepth.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)},
+      etna::Binding {1, fogMap.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)},
+    });
+
+    VkDescriptorSet vkSet = set.getVkSet();
+    vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_fogMapPipeline.getVkPipeline());
+    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_fogMapPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
+
+    vkCmdDispatch(a_cmdBuff, m_width / 4, m_height / 4, 1);
+  }
+
+
   //// draw final scene to screen
   //
   {
+    etna::set_state(a_cmdBuff, fogMap.get(), vk::PipelineStageFlagBits2::eFragmentShader,
+    vk::AccessFlags2(vk::AccessFlagBits2::eShaderSampledRead), vk::ImageLayout::eReadOnlyOptimal,
+    vk::ImageAspectFlagBits::eColor);
+
     auto simpleMaterialInfo = etna::get_shader_program("simple_material");
 
     auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
     {
       etna::Binding {0, constants.genBinding()},
-      etna::Binding {1, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
+      etna::Binding {1, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}, 
+      etna::Binding {2, fogMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
     });
 
     VkDescriptorSet vkSet = set.getVkSet();

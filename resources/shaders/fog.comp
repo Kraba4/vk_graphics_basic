@@ -1,0 +1,40 @@
+#version 450
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+struct FogParams {
+    vec3 color;
+    vec3 eye;
+};
+layout(binding=0) uniform sampler2D mainViewDepth;
+layout(binding=1, rgba32f) uniform image2D fogMap;
+layout(binding=2, rgba32f) uniform sampler3D noise;
+layout(binding=3, set = 0) uniform AppData
+{
+    FogParams Params;
+};
+
+
+void main() {
+    const ivec2 cord = ivec2(gl_GlobalInvocationID.xy);
+    const float cordDist = texelFetch(noise, cord, 0).x;
+    vec3 color = vec3(0);
+    float transmitness = 1.0;
+
+    vec3 dir = normalize(vec3(cord * 4 + 2, -1));
+    float stp = 0.05;
+    float dist = 0;
+    vec3 curPos = Params.eye;
+    for (int i = 0; i < 20; ++i) {
+        dist += stp;
+        if (dist > cordDist) {
+            break;
+        }
+        curPos = Params.eye + dist * dir;
+        float density = texelFetch(noise, curPos/2.0, 0).x;//perlin3d(curPos);
+        //density = perlin3d(curPos);
+        float t = exp(-stp * density);
+        transmitness *= t;
+        color += vec3(1) * transmitness * (1.0-t);
+    }
+    imageStore(fogMap, cord, vec4(color, transmitness));
+}
