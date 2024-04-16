@@ -215,7 +215,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     DrawSceneCmd(a_cmdBuff, m_lightMatrix, m_shadowPipeline.getVkPipelineLayout());
   }
 
-  //// draw scene in main image depth buffer
+  //// draw distances in mainViewDistance
   //
   {
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height}, {{.image = mainViewDistance.get(), .view = mainViewDistance.getView({})}},
@@ -235,6 +235,10 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     etna::set_state(a_cmdBuff, fogMap.get(), vk::PipelineStageFlagBits2::eComputeShader,
       vk::AccessFlags2(vk::AccessFlagBits2::eShaderWrite), vk::ImageLayout::eGeneral,
       vk::ImageAspectFlagBits::eColor);
+
+    etna::set_state(a_cmdBuff, shadowMap.get(), vk::PipelineStageFlagBits2::eComputeShader,
+      vk::AccessFlags2(vk::AccessFlagBits2::eShaderRead), vk::ImageLayout::eGeneral,
+      vk::ImageAspectFlagBits::eDepth);
 
     etna::flush_barriers(a_cmdBuff);
 
