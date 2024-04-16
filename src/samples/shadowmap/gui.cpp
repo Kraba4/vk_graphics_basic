@@ -13,7 +13,8 @@ void SimpleShadowmapRender::SetupGUIElements()
 
     ImGui::ColorEdit3("Meshes base color", m_uniforms.baseColor.M, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoInputs);
     ImGui::SliderFloat3("Light source position", m_uniforms.lightPos.M, -10.f, 10.f);
-
+    ImGui::SliderFloat("Min height coefficient", &pushConstLandscape.rowSizeMinMaxHeight[1], 0.f, 3.f);
+    ImGui::SliderFloat("Max height coefficient", &pushConstLandscape.rowSizeMinMaxHeight[2], 0.f, 3.f);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
     ImGui::NewLine();

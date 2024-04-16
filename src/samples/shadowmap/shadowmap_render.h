@@ -69,6 +69,14 @@ private:
     float4x4 model;
   } pushConst2M;
 
+  struct
+  {
+    float4x4 projView;
+    float4 leftForwardCorner;
+    float4 rightBackCorner;
+    float3 rowSizeMinMaxHeight;
+  } pushConstLandscape;
+
   float4x4 m_worldViewProj;
   float4x4 m_lightMatrix;    
 
@@ -77,7 +85,8 @@ private:
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
-  
+  etna::GraphicsPipeline m_landscapePipeline {};
+  etna::GraphicsPipeline m_shadowLandscapePipeline {};
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
 
@@ -129,7 +138,7 @@ private:
   void BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
 
   void DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout = VK_NULL_HANDLE);
-
+  void DrawLandscapeCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout);
   void loadShaders();
 
   void SetupSimplePipeline();

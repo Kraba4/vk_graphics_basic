@@ -90,7 +90,10 @@ void SimpleShadowmapRender::loadShaders()
 {
   etna::create_program("simple_material",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
+  etna::create_program("landscape", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", 
+     VK_GRAPHICS_BASIC_ROOT"/resources/shaders/landscape.vert.spv"});
   etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
+  etna::create_program("shadow_landscape", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/landscape.vert.spv"});
 }
 
 void SimpleShadowmapRender::SetupSimplePipeline()
@@ -113,6 +116,16 @@ void SimpleShadowmapRender::SetupSimplePipeline()
           .depthAttachmentFormat = vk::Format::eD32Sfloat
         }
     });
+
+  m_landscapePipeline = pipelineManager.createGraphicsPipeline("landscape",
+    {
+      // .vertexShaderInput = sceneVertexInputDesc,
+      .fragmentShaderOutput =
+        {
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
+          .depthAttachmentFormat = vk::Format::eD32Sfloat,
+        }
+    });
   m_shadowPipeline = pipelineManager.createGraphicsPipeline("simple_shadow",
     {
       .vertexShaderInput = sceneVertexInputDesc,
@@ -121,6 +134,15 @@ void SimpleShadowmapRender::SetupSimplePipeline()
           .depthAttachmentFormat = vk::Format::eD16Unorm
         }
     });
+
+  m_shadowLandscapePipeline = pipelineManager.createGraphicsPipeline("shadow_landscape",
+  {
+    // .vertexShaderInput = sceneVertexInputDesc,
+    .fragmentShaderOutput =
+      {
+        .depthAttachmentFormat = vk::Format::eD16Unorm
+      }
+  });
 }
 
 
@@ -149,7 +171,19 @@ void SimpleShadowmapRender::DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4
     vkCmdDrawIndexed(a_cmdBuff, mesh_info.m_indNum, 1, mesh_info.m_indexOffset, mesh_info.m_vertexOffset, 0);
   }
 }
-
+void SimpleShadowmapRender::DrawLandscapeCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout) 
+{
+  VkShaderStageFlags stageFlags = (VK_SHADER_STAGE_VERTEX_BIT);
+  pushConstLandscape.projView = a_wvp;
+  pushConstLandscape.leftForwardCorner = float4(-1, -1, 4, 0);
+  pushConstLandscape.rightBackCorner = float4(1, -1, 2, 0);
+  constexpr int rowsize = 32;
+  constexpr int colsize = 32;
+  constexpr int vertexesInQuad = 6;
+  pushConstLandscape.rowSizeMinMaxHeight[0] = rowsize;
+  vkCmdPushConstants(a_cmdBuff, a_pipelineLayout, stageFlags, 0, sizeof(pushConstLandscape), &pushConstLandscape);
+  vkCmdDraw(a_cmdBuff, rowsize * colsize * vertexesInQuad, 1, 0, 0);
+}
 void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView)
 {
   vkResetCommandBuffer(a_cmdBuff, 0);
@@ -167,6 +201,16 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
     DrawSceneCmd(a_cmdBuff, m_lightMatrix, m_shadowPipeline.getVkPipelineLayout());
+  }
+
+  //// draw landscape to shadowmap
+  //
+  {
+    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, 2048, 2048}, {},
+     {.image = shadowMap.get(), .view = shadowMap.getView({}), .loadOp = vk::AttachmentLoadOp::eLoad});
+
+    vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowLandscapePipeline.getVkPipeline());
+    DrawLandscapeCmd(a_cmdBuff, m_lightMatrix, m_shadowLandscapePipeline.getVkPipelineLayout());
   }
 
   //// draw final scene to screen
@@ -191,6 +235,29 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
       m_basicForwardPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
 
     DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_basicForwardPipeline.getVkPipelineLayout());
+  }
+
+   //// draw final scene to screen
+  //
+  {
+    auto simpleMaterialInfo = etna::get_shader_program("landscape");
+
+    auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
+    {
+      etna::Binding {0, constants.genBinding()},
+      etna::Binding {1, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
+    });
+
+    VkDescriptorSet vkSet = set.getVkSet();
+
+    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
+      {{.image = a_targetImage, .view = a_targetImageView, .loadOp = vk::AttachmentLoadOp::eLoad}},
+      {.image = mainViewDepth.get(), .view = mainViewDepth.getView({}), .loadOp = vk::AttachmentLoadOp::eLoad});
+
+    vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_landscapePipeline.getVkPipeline());
+    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      m_landscapePipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+    DrawLandscapeCmd(a_cmdBuff, m_worldViewProj, m_landscapePipeline.getVkPipelineLayout());
   }
 
   if(m_input.drawFSQuad)
