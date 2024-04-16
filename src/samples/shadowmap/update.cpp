@@ -46,6 +46,21 @@ void SimpleShadowmapRender::UpdateUniformBuffer(float a_time)
   m_uniforms.time        = a_time;
 
   memcpy(m_uboMappedMem, &m_uniforms, sizeof(m_uniforms));
+
+  auto camScreenInfo = LiteMath::float4x4();
+  constexpr float zNear = 0.1f;
+  const float aspect = float(m_width) / float(m_height);
+  const float ymax = zNear * tanf(m_cam.fov * LiteMath::DEG_TO_RAD * 0.5f);
+  const float xmax = ymax * aspect;
+
+  camScreenInfo.set_col(0, LiteMath::to_float4(m_cam.right(), xmax));
+  camScreenInfo.set_col(1, LiteMath::to_float4(m_cam.up, ymax));
+  camScreenInfo.set_col(2, LiteMath::to_float4(m_cam.forward() * zNear, a_time));
+  camScreenInfo.set_col(3, LiteMath::to_float4(m_cam.pos, 0));
+  m_fogUniforms.camScreenInfo = camScreenInfo;
+  m_fogUniforms.lightMatrix = m_lightMatrix;
+  m_fogUniforms.lightPos = m_light.cam.pos;
+  memcpy(m_uboFogMappedMem, &m_fogUniforms, sizeof(m_fogUniforms));
 }
 
 void SimpleShadowmapRender::ProcessInput(const AppInput &input)

@@ -51,4 +51,15 @@ struct UniformParams
   shader_bool  animateLightColor;
 };
 
+struct UniformFogParams
+{
+  shader_mat4  camScreenInfo;
+  shader_mat4  lightMatrix;
+  shader_vec3 lightPos;
+  bool enableSdf;
+  shader_vec3 fogColor;
+  shader_float fogFreq;
+  shader_float fogDensity;
+};
+
 #endif // VK_GRAPHICS_BASIC_COMMON_H

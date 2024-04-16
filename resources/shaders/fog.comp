@@ -1,40 +1,310 @@
 #version 450
-layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : require
 
-struct FogParams {
-    vec3 color;
-    vec3 eye;
-};
+#include "common.h"
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
 layout(binding=0) uniform sampler2D mainViewDepth;
 layout(binding=1, rgba32f) uniform image2D fogMap;
-layout(binding=2, rgba32f) uniform sampler3D noise;
-layout(binding=3, set = 0) uniform AppData
+layout(binding=2) uniform AppData
 {
-    FogParams Params;
+  UniformFogParams Params;
 };
+layout (binding = 3) uniform sampler2D shadowMap;
 
+float random(vec3 pos){
+    return fract(sin(dot(pos, vec3(64.25375463, 23.27536534, 86.29678483))) * 59482.7542);
+}
+
+vec3 randomDir(vec3 pos) {
+    int type = int(random(pos) * 6.0);
+    if (type == 0) return vec3(1, 0, 0);
+    if (type == 1) return vec3(-1, 0, 0);
+    if (type == 2) return vec3(0, 1, 0);
+    if (type == 3) return vec3(0, -1, 0);
+    if (type == 4) return vec3(0, 0, 1);
+    if (type == 5) return vec3(0, 0, -1);
+}
+
+float lerp(float x1, float x2, float t) {
+   return x1 * (1.0 - t) + x2 * t;
+}
+
+float quantic(float t) {
+ return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+float perlin3d(vec3 pos) {
+    float origX = floor(pos.x);
+    float origY = floor(pos.y);
+    float origZ = floor(pos.z);
+    //float origZ = 0.0;
+    float x = pos.x - origX;
+    float y = pos.y - origY;
+    float z = pos.z - origZ;
+    
+    vec3 p000 = vec3(origX, origY, origZ);
+    vec3 p100 = vec3(origX + 1.0, origY, origZ);
+    vec3 p010 = vec3(origX, origY + 1.0, origZ);
+    vec3 p001 = vec3(origX, origY, origZ + 1.0);
+    vec3 p110 = vec3(origX + 1.0, origY + 1.0, origZ);
+    vec3 p011 = vec3(origX, origY + 1.0, origZ + 1.0);
+    vec3 p101 = vec3(origX + 1.0, origY, origZ + 1.0);
+    vec3 p111 = vec3(origX + 1.0, origY + 1.0, origZ + 1.0);
+    
+    vec3 g000 = randomDir(p000);
+    vec3 g100 = randomDir(p100);
+    vec3 g010 = randomDir(p010);
+    vec3 g001 = randomDir(p001);
+    vec3 g110 = randomDir(p110);
+    vec3 g011 = randomDir(p011);
+    vec3 g101 = randomDir(p101);
+    vec3 g111 = randomDir(p111);
+    
+    float d000 = dot(pos - p000, g000);
+    float d100 = dot(pos - p100, g100);
+    float d010 = dot(pos - p010, g010);
+    float d001 = dot(pos - p001, g001);
+    float d110 = dot(pos - p110, g110);
+    float d011 = dot(pos - p011, g011);
+    float d101 = dot(pos - p101, g101);
+    float d111 = dot(pos - p111, g111);
+    
+    x = quantic(x);
+    y = quantic(y);
+    z = quantic(z);
+    
+    float lx1 = lerp(d000, d100, x);
+    float lx2 = lerp(d010, d110, x);
+    float lx3 = lerp(d001, d101, x);
+    float lx4 = lerp(d011, d111, x);
+    
+    float ly1 = lerp(lx1, lx2, y);
+    float ly2 = lerp(lx3, lx4, y);
+    
+    float lz1 = lerp(ly1, ly2, z);
+    return lz1 + 0.2f;
+    //return lerp(lx1, lx2, y);
+}
+
+float dBox ( vec3 p, vec3 b)
+{
+	return length ( max ( abs ( p ) - b, 0.0 ) );
+}
+
+float dSphere( vec3 p, float radius) {
+    return length(p) - radius;
+}
+
+float dTorus ( vec3 p, vec2 t )
+{
+	vec2	q = vec2 ( length ( p.xz ) - t.x, p.y );
+	
+	return length ( q ) - t.y;
+}
+
+float dCyl ( vec3 p, vec3 c )
+{
+	return length ( p.xz - c.xy ) - c.z;
+}
+
+float dTooth(vec3 point, vec3 center) {
+    return max(dBox(point - center, vec3(0.05, 0.05, 0.05)),
+           -dSphere(point - center + vec3(0.0, -0.1, 0.0), 0.1));
+}
+float smin(float a, float b, float k) {
+    float res = exp(-k*a) + exp(-k*b);
+    return -log(res)/k;
+}
+float smax( float a, float b, float k )
+{
+    float h = max(k-abs(a-b),0.0);
+    return max(a, b) + h*h*0.25/k;
+}
+
+float sdTriPrism( vec3 p, vec2 h )
+{
+    const float k = sqrt(3.0);
+    h.x *= 0.5*k;
+    p.xy /= h.x;
+    p.x = abs(p.x) - 1.0;
+    p.y = p.y + 1.0/k;
+    if( p.x+k*p.y>0.0 ) p.xy=vec2(p.x-k*p.y,-k*p.x-p.y)/2.0;
+    p.x -= clamp( p.x, -2.0, 0.0 );
+    float d1 = length(p.xy)*sign(-p.y)*h.x;
+    float d2 = abs(p.z)-h.y;
+    return length(max(vec2(d1,d2),0.0)) + min(max(d1,d2), 0.);
+}
+
+float FAST(uvec3 data)
+{
+    uint hash = 8u, tmp;
+
+    hash += data.x & 0xffffu;
+    tmp = (((data.x >> 16) & 0xffffu) << 11) ^ hash;
+    hash = (hash << 16) ^ tmp;
+    hash += hash >> 11;
+
+    hash += data.y & 0xffffu;
+    tmp = (((data.y >> 16) & 0xffffu) << 11) ^ hash;
+    hash = (hash << 16) ^ tmp;
+    hash += hash >> 11;
+
+    hash += data.z & 0xffffu;
+    tmp = (((data.z >> 16) & 0xffffu) << 11) ^ hash;
+    hash = (hash << 16) ^ tmp;
+    hash += hash >> 11;
+
+    /* Force "avalanching" of final 127 bits */
+    hash ^= hash << 3;
+    hash += hash >> 5;
+    hash ^= hash << 4;
+    hash += hash >> 17;
+    hash ^= hash << 25;
+    hash += hash >> 6;
+
+    return float(hash) / 2000000000.f;
+}
+float sph( ivec3 i, vec3 f, ivec3 c )
+{
+   // random radius at grid vertex i+c
+   //float rad = 0.000000005*float(hash(uvec3(i)+uvec3(c)));
+   // distance to sphere at grid vertex i+c
+   float rad = min(0.5, 0.3 * float(FAST(uvec3(i + c))));
+   return length(f-vec3(c)) - rad; 
+}
+
+float sdBase( vec3 p )
+{
+   ivec3 i = ivec3(floor(p));
+    vec3 f =       fract(p);
+   // distance to the 8 corners spheres
+   return min(min(min(sph(i,f,ivec3(0,0,0)),
+                      sph(i,f,ivec3(0,0,1))),
+                  min(sph(i,f,ivec3(0,1,0)),
+                      sph(i,f,ivec3(0,1,1)))),
+              min(min(sph(i,f,ivec3(1,0,0)),
+                      sph(i,f,ivec3(1,0,1))),
+                  min(sph(i,f,ivec3(1,1,0)),
+                      sph(i,f,ivec3(1,1,1)))));
+}
+float sdFbm( vec3 p, float d )
+{
+   float s = 1.0;
+   for( int i=0; i<5; i++ )
+   {
+       // evaluate new octave
+       float n = s*sdBase(p);
+	
+       // add
+       n = smax(n,d-0.1*s,0.3*s);
+       d = smin(n,d      ,0.3*s);
+	
+       // prepare next octave
+       p = mat3( 0.00, 1.60, 1.20,
+                -1.60, 0.72,-0.96,
+                -1.20,-0.96, 1.28 )*p;
+       s = 0.5*s;
+   }
+   return d;
+}
+
+int type = 0;
+vec3 skull_offset;
+float sdf(vec3 point, float time) {
+    point -= vec3(0.4, 0, 0.5);
+    point *= 2;
+    float back = max(dBox(point + vec3(0.0, 0.0, 0.2), vec3(0.4, 1.0, 0.4)), dSphere(point, 0.5));
+    float face = min(max(dBox(point + vec3(0.0, -0.05, -0.4), vec3(0.4, 0.4, 0.2)),
+      -dSphere(point + vec3(-0.2, -0.1, -0.6), 0.1)),
+      dBox(point + vec3(0.0, 0.5, -0.1), vec3(0.4, 0.3, 0.1)));
+    float tooth = dTooth(point, vec3(0.0, -0.4, 0.5));
+    skull_offset = vec3(sin(time* 2.0) / 30.0, -abs(sin(time * 2.0)) / 13.5, 0.0);
+    float skull = dBox(point + skull_offset + vec3(0.0, 0.8, -0.4), vec3(0.4, 0.1, 0.2));
+    
+    for (int i = 0; i < 5; ++i) {
+        face = min(face, dTooth(point, vec3(-0.325, -0.4,0.5) + vec3(1.0/6.0 * float(i), 0,0)));
+    }
+    face = max(face, -dSphere(point + vec3(0.6, 0.2, -0.6), 0.25));
+    face = max(face, -dSphere(point + vec3(-0.6, 0.2, -0.6), 0.25));
+    vec3 flipped_point = point;
+    flipped_point.y = -flipped_point.y;
+    skull_offset.y = -skull_offset.y;
+    for (int i = 0; i < 5; ++i) {
+        skull = smin(skull, 
+                 dTooth(flipped_point  + skull_offset, vec3(-0.325, 0.65,0.5) + vec3(1.0/6.0 * float(i), 0,0)),
+                 60.0);
+    }
+    float head = smin(back, face, 7.0);
+    head = max(head, -sdTriPrism(point + vec3(0.0, 0.2, -0.6), vec2(0.1)));
+    
+    type = 0;
+    float glas =  dSphere(point + vec3(0.2, -0.1, -0.6), 0.1);
+    if (glas < head) {
+        type = 2;
+    }
+    head = min(head, glas);
+    if (skull < head) {
+        type = 1;
+    }
+    return smin(head, skull, 40.0);
+}
 
 void main() {
     const ivec2 cord = ivec2(gl_GlobalInvocationID.xy);
-    const float cordDist = texelFetch(noise, cord, 0).x;
-    vec3 color = vec3(0);
-    float transmitness = 1.0;
+    const vec2 size = textureSize(mainViewDepth, 0);
+    const vec2 fogMapSize = size / 4;
+    if (cord.x < fogMapSize.x && cord.y < fogMapSize.y) {
+        const vec2 cordInMain = cord * 4 + vec2(2);
+        const float cordDist = texelFetch(mainViewDepth, ivec2(cordInMain), 0).x;
+        const vec3 eye = Params.camScreenInfo[3].xyz;
+        const vec3 center = Params.camScreenInfo[2].xyz;
+        const vec3 up = Params.camScreenInfo[1].xyz;
+        const vec3 right = Params.camScreenInfo[0].xyz;
+        const float xmax = Params.camScreenInfo[0].w;
+        const float ymax = Params.camScreenInfo[1].w;
+        const float time = Params.camScreenInfo[2].w;
+        const vec3 pixelWorldPos = eye + center + (cordInMain.y  / (size.y) * 2 * ymax - ymax) * (-up) + (cordInMain.x / (size.x) * 2 * xmax - xmax) * right;
 
-    vec3 dir = normalize(vec3(cord * 4 + 2, -1));
-    float stp = 0.05;
-    float dist = 0;
-    vec3 curPos = Params.eye;
-    for (int i = 0; i < 20; ++i) {
-        dist += stp;
-        if (dist > cordDist) {
-            break;
+        vec3 color = vec3(0);
+        float transmitness = 1.0;
+        vec3 dir = normalize(pixelWorldPos - eye);
+        const float stp = 0.02;
+        float dist = 0;
+        vec3 curPos = pixelWorldPos;
+
+        for (int i = 0; i < 1000; ++i) {
+            dist += stp;
+            if (dist > cordDist) {
+                // color = vec3(1, 0, 0);
+                break;
+            }
+            if (transmitness < 0.05) {
+                break;
+            }
+            curPos = pixelWorldPos + dist * dir;
+            vec3 tCurPos = curPos * vec3(1);
+            tCurPos.x += time / 10.0f;
+            float density;
+            if (Params.enableSdf) {
+                density = abs(perlin3d(tCurPos * Params.fogFreq)) * Params.fogDensity + step(0, -sdf(curPos, time));
+            } else {
+                density = abs(perlin3d(tCurPos * Params.fogFreq)) * Params.fogDensity;
+            }
+            const float t = exp(-stp * density);
+
+            const vec4 posLightClipSpace = Params.lightMatrix*vec4(curPos, 1.0f); // 
+            const vec3 posLightSpaceNDC  = posLightClipSpace.xyz/posLightClipSpace.w;    // for orto matrix, we don't need perspective division, you can remove it if you want; this is general case;
+            const vec2 shadowTexCoord    = posLightSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);  // just shift coords from [-1,1] to [0,1]               
+                
+            const bool  outOfView = (shadowTexCoord.x < 0.0001f || shadowTexCoord.x > 0.9999f || shadowTexCoord.y < 0.0091f || shadowTexCoord.y > 0.9999f);
+            const float shadow    = ((posLightSpaceNDC.z < textureLod(shadowMap, shadowTexCoord, 0).x + 0.001f) || outOfView) ? 1.0f : 0.0f;
+            
+            color += Params.fogColor * transmitness * (1.0-t) * (shadow + 0.1f);
+            transmitness *= t;
         }
-        curPos = Params.eye + dist * dir;
-        float density = texelFetch(noise, curPos/2.0, 0).x;//perlin3d(curPos);
-        //density = perlin3d(curPos);
-        float t = exp(-stp * density);
-        transmitness *= t;
-        color += vec3(1) * transmitness * (1.0-t);
+        imageStore(fogMap, cord, vec4(vec3(color), transmitness));
     }
-    imageStore(fogMap, cord, vec4(color, transmitness));
 }

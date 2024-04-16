@@ -13,6 +13,10 @@ void SimpleShadowmapRender::SetupGUIElements()
 
     ImGui::ColorEdit3("Meshes base color", m_uniforms.baseColor.M, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoInputs);
     ImGui::SliderFloat3("Light source position", m_uniforms.lightPos.M, -10.f, 10.f);
+    ImGui::SliderFloat("Noise frequency", &m_fogUniforms.fogFreq, 1.f, 20.f);
+    ImGui::SliderFloat("Fog density", &m_fogUniforms.fogDensity, 0.f, 3.0f);
+    ImGui::ColorEdit3("Fog color", m_fogUniforms.fogColor.M, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoInputs);
+    ImGui::Checkbox("Enable sdf", &m_fogUniforms.enableSdf);
 
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 

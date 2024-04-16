@@ -23,6 +23,14 @@ void SimpleShadowmapRender::AllocateResources()
     .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment
   });
 
+  mainViewDistance = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width, m_height, 1},
+    .name = "main_view_distance",
+    .format = vk::Format::eR32G32B32A32Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled
+  });
+
   shadowMap = m_context->createImage(etna::Image::CreateInfo
   {
     .extent = vk::Extent3D{2048, 2048, 1},
@@ -48,7 +56,16 @@ void SimpleShadowmapRender::AllocateResources()
     .name = "constants"
   });
 
+  constantsFog = m_context->createBuffer(etna::Buffer::CreateInfo
+  {
+    .size = sizeof(UniformFogParams),
+    .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer,
+    .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+    .name = "constants_fog"
+  });
+
   m_uboMappedMem = constants.map();
+  m_uboFogMappedMem = constantsFog.map();
 }
 
 void SimpleShadowmapRender::LoadScene(const char* path, bool transpose_inst_matrices)
@@ -70,12 +87,14 @@ void SimpleShadowmapRender::LoadScene(const char* path, bool transpose_inst_matr
 void SimpleShadowmapRender::DeallocateResources()
 {
   mainViewDepth.reset(); // TODO: Make an etna method to reset all the resources
+  mainViewDistance.reset(); 
   shadowMap.reset();
   fogMap.reset();
   m_swapchain.Cleanup();
   vkDestroySurfaceKHR(GetVkInstance(), m_surface, nullptr);  
 
   constants = etna::Buffer();
+  constantsFog = etna::Buffer();
 }
 
 
@@ -100,6 +119,7 @@ void SimpleShadowmapRender::loadShaders()
   etna::create_program("simple_material",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
   etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
+  etna::create_program("simple_distance", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/distance.frag.spv"});
   etna::create_program("compute_fog", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/fog.comp.spv"});
 }
 
@@ -121,8 +141,7 @@ void SimpleShadowmapRender::SetupSimplePipeline()
         {
           .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
           .depthAttachmentFormat = vk::Format::eD32Sfloat
-        },
-      .depthConfig = {.depthCompareOp = vk::CompareOp::eEqual}
+        }
     });
   m_shadowPipeline = pipelineManager.createGraphicsPipeline("simple_shadow",
     {
@@ -132,6 +151,15 @@ void SimpleShadowmapRender::SetupSimplePipeline()
           .depthAttachmentFormat = vk::Format::eD16Unorm
         }
     });
+  m_wPipeline = pipelineManager.createGraphicsPipeline("simple_distance",
+  {
+    .vertexShaderInput = sceneVertexInputDesc,
+    .fragmentShaderOutput =
+      {
+        .colorAttachmentFormats = {vk::Format::eR32G32B32A32Sfloat},
+        .depthAttachmentFormat = vk::Format::eD32Sfloat
+      }
+  });
   m_fogMapPipeline = pipelineManager.createComputePipeline("compute_fog", {});
 }
 
@@ -154,12 +182,17 @@ void SimpleShadowmapRender::DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4
   {
     auto inst         = m_pScnMgr->GetInstanceInfo(i);
     pushConst2M.model = m_pScnMgr->GetInstanceMatrix(i);
+    // pushConst2M.background = false;
     vkCmdPushConstants(a_cmdBuff, a_pipelineLayout,
       stageFlags, 0, sizeof(pushConst2M), &pushConst2M);
 
     auto mesh_info = m_pScnMgr->GetMeshInfo(inst.mesh_id);
     vkCmdDrawIndexed(a_cmdBuff, mesh_info.m_indNum, 1, mesh_info.m_indexOffset, mesh_info.m_vertexOffset, 0);
   }
+  // pushConst2M.background = true;
+  //   vkCmdPushConstants(a_cmdBuff, m_basicForwardPipeline.getVkPipelineLayout(),
+  //     stageFlags, 0, sizeof(pushConst2M), &pushConst2M);
+  //   vkCmdDraw(a_cmdBuff, 3, 1, 0, 0);
 }
 
 void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView)
@@ -175,6 +208,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   //// draw scene to shadowmap
   //
   {
+  
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, 2048, 2048}, {}, {.image = shadowMap.get(), .view = shadowMap.getView({})});
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
@@ -184,18 +218,19 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   //// draw scene in main image depth buffer
   //
   {
-    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height}, {}, {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
+    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height}, {{.image = mainViewDistance.get(), .view = mainViewDistance.getView({})}},
+     {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
 
-    vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
-    DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_shadowPipeline.getVkPipelineLayout());
+    vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_wPipeline.getVkPipeline());
+    DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_wPipeline.getVkPipelineLayout());
   }
   
   //// draw to fogMap
   //
   {
-    etna::set_state(a_cmdBuff, mainViewDepth.get(), vk::PipelineStageFlagBits2::eComputeShader,
+    etna::set_state(a_cmdBuff, mainViewDistance.get(), vk::PipelineStageFlagBits2::eComputeShader,
       vk::AccessFlags2(vk::AccessFlagBits2::eShaderRead), vk::ImageLayout::eGeneral,
-      vk::ImageAspectFlagBits::eDepth);
+      vk::ImageAspectFlagBits::eColor);
 
     etna::set_state(a_cmdBuff, fogMap.get(), vk::PipelineStageFlagBits2::eComputeShader,
       vk::AccessFlags2(vk::AccessFlagBits2::eShaderWrite), vk::ImageLayout::eGeneral,
@@ -206,15 +241,17 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     auto fogInfo = etna::get_shader_program("compute_fog");
     auto set = etna::create_descriptor_set(fogInfo.getDescriptorLayoutId(0), a_cmdBuff,
     {
-      etna::Binding {0, mainViewDepth.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)},
+      etna::Binding {0, mainViewDistance.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)},
       etna::Binding {1, fogMap.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)},
+      etna::Binding {2, constantsFog.genBinding()},
+      etna::Binding {3, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eGeneral)}, 
     });
 
     VkDescriptorSet vkSet = set.getVkSet();
     vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_fogMapPipeline.getVkPipeline());
     vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_fogMapPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
 
-    vkCmdDispatch(a_cmdBuff, m_width / 4, m_height / 4, 1);
+    vkCmdDispatch(a_cmdBuff, m_width / 4 / 32, m_height / 4 / 32, 1);
   }
 
 
@@ -227,14 +264,14 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     auto simpleMaterialInfo = etna::get_shader_program("simple_material");
 
-    auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
+    auto set1 = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
     {
       etna::Binding {0, constants.genBinding()},
       etna::Binding {1, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}, 
       etna::Binding {2, fogMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
     });
 
-    VkDescriptorSet vkSet = set.getVkSet();
+    VkDescriptorSet vkSet[] = {set1.getVkSet()};
 
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
       {{.image = a_targetImage, .view = a_targetImageView}},
@@ -242,8 +279,9 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_basicForwardPipeline.getVkPipeline());
     vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      m_basicForwardPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+      m_basicForwardPipeline.getVkPipelineLayout(), 0, 1, vkSet, 0, VK_NULL_HANDLE);
 
+    VkShaderStageFlags stageFlags = (VK_SHADER_STAGE_VERTEX_BIT);
     DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_basicForwardPipeline.getVkPipelineLayout());
   }
 

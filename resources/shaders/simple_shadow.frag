@@ -19,7 +19,8 @@ layout(binding = 0, set = 0) uniform AppData
   UniformParams Params;
 };
 
-layout (binding = 1) uniform sampler2D shadowMap;
+layout (binding = 1, set = 0) uniform sampler2D shadowMap;
+layout (binding = 2, set = 0) uniform sampler2D fogMap;
 
 void main()
 {
@@ -38,5 +39,6 @@ void main()
    
   vec3 lightDir   = normalize(Params.lightPos - surf.wPos);
   vec4 lightColor = max(dot(surf.wNorm, lightDir), 0.0f) * lightColor1;
-  out_fragColor   = (lightColor*shadow + vec4(0.1f)) * vec4(Params.baseColor, 1.0f);
+  out_fragColor   = (lightColor*shadow + vec4(0.1f)) * vec4(Params.baseColor, 1.0f) * texelFetch(fogMap, ivec2(gl_FragCoord.xy / 4.0f), 0).w 
+                     + vec4(texelFetch(fogMap, ivec2(gl_FragCoord.xy / 4.0f), 0).xyz, 0);
 }

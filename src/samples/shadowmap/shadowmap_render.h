@@ -46,10 +46,12 @@ public:
 private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
+  etna::Image mainViewDistance;
   etna::Image shadowMap;
   etna::Image fogMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
+  etna::Buffer constantsFog;
 
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
@@ -68,18 +70,22 @@ private:
   {
     float4x4 projView;
     float4x4 model;
+    // bool background;
   } pushConst2M;
 
   float4x4 m_worldViewProj;
   float4x4 m_lightMatrix;    
 
   UniformParams m_uniforms {};
+  UniformFogParams m_fogUniforms {};
   void* m_uboMappedMem = nullptr;
+  void* m_uboFogMappedMem = nullptr;
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
+  etna::GraphicsPipeline m_wPipeline {};
   etna::ComputePipeline m_fogMapPipeline {};
-
+  etna::ComputePipeline m_addfogPipeline {};
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
 
