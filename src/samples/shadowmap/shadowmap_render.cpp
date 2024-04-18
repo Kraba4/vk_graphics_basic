@@ -9,6 +9,7 @@
 #include <etna/Etna.hpp>
 #include <etna/RenderTargetStates.hpp>
 #include <vulkan/vulkan_core.h>
+#include <etna/Sampler.hpp>
 
 
 /// RESOURCE ALLOCATION
@@ -65,13 +66,22 @@ void SimpleShadowmapRender::AllocateResources()
     .samples = vk::SampleCountFlagBits::e4
   });
 
-  oldMainView = m_context->createImage(etna::Image::CreateInfo
+  oldMainView[0] = m_context->createImage(etna::Image::CreateInfo
   {
     .extent = vk::Extent3D{m_width, m_height, 1},
-    .name = "old_main_view",
-    .format = static_cast<vk::Format>(m_swapchain.GetFormat()),
-    .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled
+    .name = "old_main_view1",
+    .format = vk::Format::eR16G16B16A16Unorm,
+    .imageUsage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
   });
+
+  oldMainView[1] = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width, m_height, 1},
+    .name = "old_main_view2",
+    .format = vk::Format::eR16G16B16A16Unorm,
+    .imageUsage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
+  });
+
 
   shadowMap = m_context->createImage(etna::Image::CreateInfo
   {
@@ -125,7 +135,8 @@ void SimpleShadowmapRender::DeallocateResources()
   bigMainView.reset();
   msaaMainView.reset();
   msaaMainViewDepth.reset();
-  oldMainView.reset();
+  oldMainView[0].reset();
+  oldMainView[1].reset();
   oldMainViewDepth.reset();
   shadowMap.reset();
   m_swapchain.Cleanup();
@@ -196,9 +207,25 @@ void SimpleShadowmapRender::SetupSimplePipeline()
   m_temporalPipeline = pipelineManager.createGraphicsPipeline("temporal",
     {
       .vertexShaderInput = sceneVertexInputDesc,
+      .blendingConfig = {
+        .attachments = {
+        vk::PipelineColorBlendAttachmentState{
+          .blendEnable = vk::False,
+          // Which color channels should we write to?
+          .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+            vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+        },
+        vk::PipelineColorBlendAttachmentState{
+          .blendEnable = vk::False,
+          // Which color channels should we write to?
+          .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+            vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+        }
+      }
+      },
       .fragmentShaderOutput =
         {
-          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat()), vk::Format::eR16G16B16A16Unorm},
           .depthAttachmentFormat = vk::Format::eD32Sfloat
         }
     });
@@ -415,49 +442,56 @@ void SimpleShadowmapRender::CopyImageCmd(VkCommandBuffer a_cmdBuff, VkImage from
 
 void SimpleShadowmapRender::BuildTemporal(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView)
 {
-  if (m_temporal_first_frame) {
-    BuildNoAA(a_cmdBuff, a_targetImage, a_targetImageView);
-    m_temporal_first_frame = false;
-  } else {
-    //// draw scene to shadowmap
-    //
-    {
-      etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, 2048, 2048}, {}, {.image = shadowMap.get(), .view = shadowMap.getView({})});
+  //// draw scene to shadowmap
+  //
+  {
+    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, 2048, 2048}, {}, {.image = shadowMap.get(), .view = shadowMap.getView({})});
 
-      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
-      DrawSceneCmd(a_cmdBuff, m_lightMatrix, m_shadowPipeline.getVkPipelineLayout());
-    }
-
-    //// draw final scene to screen
-    //
-    {
-      auto temporalInfo = etna::get_shader_program("temporal");
-
-      auto set = etna::create_descriptor_set(temporalInfo.getDescriptorLayoutId(0), a_cmdBuff,
-      {
-        etna::Binding {0, constantsTemporal.genBinding()},
-        etna::Binding {1, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-        etna::Binding {2, oldMainView.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-        // etna::Binding {3, oldMainViewDepth.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-      });
-
-      VkDescriptorSet vkSet = set.getVkSet();
-
-      etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
-        {{.image = a_targetImage, .view = a_targetImageView}},
-        {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
-
-      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_temporalPipeline.getVkPipeline());
-      vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        m_temporalPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
-      pushConst2M.step = m_trembleStep;
-      DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_temporalPipeline.getVkPipelineLayout());
-    }
+    vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
+    DrawSceneCmd(a_cmdBuff, m_lightMatrix, m_shadowPipeline.getVkPipelineLayout());
   }
-  CopyImageCmd(a_cmdBuff, a_targetImage, oldMainView.get(), VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT);
+
+  //// draw final scene to screen
+  //
+  {
+    etna::set_state(a_cmdBuff, oldMainView[countOld % 2].get(), vk::PipelineStageFlagBits2::eFragmentShader,
+    vk::AccessFlags2(vk::AccessFlagBits2::eShaderRead), vk::ImageLayout::eShaderReadOnlyOptimal,
+    vk::ImageAspectFlagBits::eColor);
+    etna::set_state(a_cmdBuff, oldMainView[(countOld + 1) % 2].get(), vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+    vk::AccessFlags2(vk::AccessFlagBits2::eColorAttachmentWrite), vk::ImageLayout::eColorAttachmentOptimal,
+    vk::ImageAspectFlagBits::eColor);
+    etna::flush_barriers(a_cmdBuff);
+    auto temporalInfo = etna::get_shader_program("temporal");
+
+    auto set = etna::create_descriptor_set(temporalInfo.getDescriptorLayoutId(0), a_cmdBuff,
+    {
+      etna::Binding {0, constantsTemporal.genBinding()},
+      etna::Binding {1, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+      etna::Binding {2, oldMainView[countOld % 2].genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+      // etna::Binding {3, oldMainViewDepth.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+    });
+
+    VkDescriptorSet vkSet = set.getVkSet();
+
+    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
+      {{.image = a_targetImage, .view = a_targetImageView}, {.image = oldMainView[(countOld + 1) % 2].get(), .view = oldMainView[(countOld + 1) % 2].getView({})}},
+      {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
+
+    vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_temporalPipeline.getVkPipeline());
+    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      m_temporalPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+    pushConst2M.step = m_trembleStep;
+    DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_temporalPipeline.getVkPipelineLayout());
+  }
+  // std::swap(oldMainView1, oldMainView2);
+  // CopyImageCmd(a_cmdBuff, a_targetImage, oldMainView.get(), VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT);
   // CopyImageCmd(a_cmdBuff, mainViewDepth.get(), oldMainViewDepth.get(), VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT);
   m_oldWorldViewProj = m_worldViewProj;
-  m_trembleStep = (m_trembleStep + 1) % 8;
+  m_trembleStep = (m_trembleStep + 1) % 128;
+  if (m_temporal_first_frame) {
+    m_temporal_first_frame = false;
+  }
+  countOld += 1;
 }
 
 void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView)

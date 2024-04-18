@@ -50,7 +50,8 @@ private:
   etna::Image bigMainView;
   etna::Image msaaMainViewDepth;
   etna::Image msaaMainView;
-  etna::Image oldMainView;
+  etna::Image oldMainView[2];
+  int64_t countOld = 0;
   etna::Image oldMainViewDepth;
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
