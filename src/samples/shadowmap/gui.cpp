@@ -16,6 +16,7 @@ void SimpleShadowmapRender::SetupGUIElements()
     ImGui::RadioButton("No AA", reinterpret_cast<int*>(&m_antialisingMethod), static_cast<int>(AAMethod::Nothing));
     ImGui::RadioButton("SSAA", reinterpret_cast<int*>(&m_antialisingMethod),  static_cast<int>(AAMethod::SuperSampling));
     ImGui::RadioButton("MSAA", reinterpret_cast<int*>(&m_antialisingMethod),  static_cast<int>(AAMethod::MultiSampling));
+    ImGui::RadioButton("TAA", reinterpret_cast<int*>(&m_antialisingMethod),  static_cast<int>(AAMethod::Temporal));
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
     ImGui::NewLine();

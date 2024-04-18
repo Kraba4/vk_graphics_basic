@@ -46,6 +46,14 @@ void SimpleShadowmapRender::UpdateUniformBuffer(float a_time)
   m_uniforms.time        = a_time;
 
   memcpy(m_uboMappedMem, &m_uniforms, sizeof(m_uniforms));
+
+  m_uniformsTemporal.lightMatrix = m_lightMatrix;
+  m_uniformsTemporal.oldProjView = m_oldWorldViewProj;
+  m_uniformsTemporal.lightPos    = m_light.cam.pos; //LiteMath::float3(sinf(a_time), 1.0f, cosf(a_time));
+  m_uniformsTemporal.time        = a_time;
+  m_uniformsTemporal.penultTrembleStep = m_trembleStep == 0 ? 7 : m_trembleStep - 1;
+  memcpy(m_uboMappedMemTemporal, &m_uniformsTemporal, sizeof(m_uniformsTemporal));
+
 }
 
 void SimpleShadowmapRender::ProcessInput(const AppInput &input)

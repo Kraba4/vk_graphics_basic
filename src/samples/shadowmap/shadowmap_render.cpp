@@ -20,7 +20,15 @@ void SimpleShadowmapRender::AllocateResources()
     .extent = vk::Extent3D{m_width, m_height, 1},
     .name = "main_view_depth",
     .format = vk::Format::eD32Sfloat,
-    .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment
+    .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eTransferSrc
+  });
+
+  oldMainViewDepth = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width, m_height, 1},
+    .name = "old_main_view_depth",
+    .format = vk::Format::eD32Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled
   });
 
   bigMainViewDepth = m_context->createImage(etna::Image::CreateInfo
@@ -57,6 +65,14 @@ void SimpleShadowmapRender::AllocateResources()
     .samples = vk::SampleCountFlagBits::e4
   });
 
+  oldMainView = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width, m_height, 1},
+    .name = "old_main_view",
+    .format = static_cast<vk::Format>(m_swapchain.GetFormat()),
+    .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled
+  });
+
   shadowMap = m_context->createImage(etna::Image::CreateInfo
   {
     .extent = vk::Extent3D{2048, 2048, 1},
@@ -74,7 +90,16 @@ void SimpleShadowmapRender::AllocateResources()
     .name = "constants"
   });
 
+  constantsTemporal = m_context->createBuffer(etna::Buffer::CreateInfo
+  {
+    .size = sizeof(UniformParamsForTemporal),
+    .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer,
+    .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+    .name = "constants_temporal"
+  });
+
   m_uboMappedMem = constants.map();
+  m_uboMappedMemTemporal = constantsTemporal.map();
 }
 
 void SimpleShadowmapRender::LoadScene(const char* path, bool transpose_inst_matrices)
@@ -98,11 +123,16 @@ void SimpleShadowmapRender::DeallocateResources()
   mainViewDepth.reset(); // TODO: Make an etna method to reset all the resources
   bigMainViewDepth.reset();
   bigMainView.reset();
+  msaaMainView.reset();
+  msaaMainViewDepth.reset();
+  oldMainView.reset();
+  oldMainViewDepth.reset();
   shadowMap.reset();
   m_swapchain.Cleanup();
   vkDestroySurfaceKHR(GetVkInstance(), m_surface, nullptr);  
 
   constants = etna::Buffer();
+  constantsTemporal = etna::Buffer();
 }
 
 
@@ -127,6 +157,8 @@ void SimpleShadowmapRender::loadShaders()
   etna::create_program("simple_material",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
   etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
+  etna::create_program("temporal",
+    {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/temporal.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
 }
 
 void SimpleShadowmapRender::SetupSimplePipeline()
@@ -155,6 +187,15 @@ void SimpleShadowmapRender::SetupSimplePipeline()
       .multisampleConfig = {
         .rasterizationSamples = vk::SampleCountFlagBits::e4
       },
+      .fragmentShaderOutput =
+        {
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
+          .depthAttachmentFormat = vk::Format::eD32Sfloat
+        }
+    });
+  m_temporalPipeline = pipelineManager.createGraphicsPipeline("temporal",
+    {
+      .vertexShaderInput = sceneVertexInputDesc,
       .fragmentShaderOutput =
         {
           .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
@@ -344,6 +385,81 @@ void SimpleShadowmapRender::BuildMultisampling(VkCommandBuffer a_cmdBuff, VkImag
   }
 }
 
+void SimpleShadowmapRender::CopyImageCmd(VkCommandBuffer a_cmdBuff, VkImage from, VkImage to, VkImageAspectFlagBits aspectMask) {
+  etna::set_state(a_cmdBuff, from, vk::PipelineStageFlagBits2::eTransfer,
+  vk::AccessFlags2(vk::AccessFlagBits2::eTransferRead), vk::ImageLayout::eTransferSrcOptimal,
+  vk::ImageAspectFlagBits(aspectMask));
+  etna::set_state(a_cmdBuff, to, vk::PipelineStageFlagBits2::eTransfer,
+  vk::AccessFlags2(vk::AccessFlagBits2::eTransferWrite), vk::ImageLayout::eTransferDstOptimal,
+  vk::ImageAspectFlagBits(aspectMask));
+  etna::flush_barriers(a_cmdBuff);
+  
+  VkImageCopy region;
+  region.srcSubresource.aspectMask = aspectMask;
+  region.srcSubresource.mipLevel = 0;
+  region.srcSubresource.baseArrayLayer = 0;
+  region.srcSubresource.layerCount = 1;
+
+  region.dstSubresource.aspectMask = aspectMask;
+  region.dstSubresource.mipLevel = 0;
+  region.dstSubresource.baseArrayLayer = 0;
+  region.dstSubresource.layerCount = 1;
+
+  region.srcOffset = {};
+  region.dstOffset = {};
+  region.extent = {m_width, m_height, 1};
+
+  vkCmdCopyImage(a_cmdBuff, from, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                              to, VkImageLayout::VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+}
+
+void SimpleShadowmapRender::BuildTemporal(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView)
+{
+  if (m_temporal_first_frame) {
+    BuildNoAA(a_cmdBuff, a_targetImage, a_targetImageView);
+    m_temporal_first_frame = false;
+  } else {
+    //// draw scene to shadowmap
+    //
+    {
+      etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, 2048, 2048}, {}, {.image = shadowMap.get(), .view = shadowMap.getView({})});
+
+      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
+      DrawSceneCmd(a_cmdBuff, m_lightMatrix, m_shadowPipeline.getVkPipelineLayout());
+    }
+
+    //// draw final scene to screen
+    //
+    {
+      auto temporalInfo = etna::get_shader_program("temporal");
+
+      auto set = etna::create_descriptor_set(temporalInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, constantsTemporal.genBinding()},
+        etna::Binding {1, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {2, oldMainView.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        // etna::Binding {3, oldMainViewDepth.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+      });
+
+      VkDescriptorSet vkSet = set.getVkSet();
+
+      etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
+        {{.image = a_targetImage, .view = a_targetImageView}},
+        {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
+
+      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_temporalPipeline.getVkPipeline());
+      vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        m_temporalPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+      pushConst2M.step = m_trembleStep;
+      DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_temporalPipeline.getVkPipelineLayout());
+    }
+  }
+  CopyImageCmd(a_cmdBuff, a_targetImage, oldMainView.get(), VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT);
+  // CopyImageCmd(a_cmdBuff, mainViewDepth.get(), oldMainViewDepth.get(), VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT);
+  m_oldWorldViewProj = m_worldViewProj;
+  m_trembleStep = (m_trembleStep + 1) % 8;
+}
+
 void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView)
 {
   vkResetCommandBuffer(a_cmdBuff, 0);
@@ -353,6 +469,12 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
   VK_CHECK_RESULT(vkBeginCommandBuffer(a_cmdBuff, &beginInfo));
+
+  if (m_antialisingMethod != AAMethod::Temporal) {
+    m_temporal_first_frame = true;
+    m_trembleStep = 0;
+    pushConst2M.step = 0;
+  }
 
   switch (m_antialisingMethod)
   {
@@ -364,6 +486,9 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     break;
   case AAMethod::MultiSampling:
     BuildMultisampling(a_cmdBuff, a_targetImage, a_targetImageView);
+    break;
+  case AAMethod::Temporal:
+    BuildTemporal(a_cmdBuff, a_targetImage, a_targetImageView);
     break;
   default:
     // BuildNoAA(a_cmdBuff, a_targetImage, a_targetImageView);

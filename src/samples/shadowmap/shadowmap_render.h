@@ -50,10 +50,12 @@ private:
   etna::Image bigMainView;
   etna::Image msaaMainViewDepth;
   etna::Image msaaMainView;
+  etna::Image oldMainView;
+  etna::Image oldMainViewDepth;
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
-
+  etna::Buffer constantsTemporal;
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
   struct
@@ -71,17 +73,25 @@ private:
   {
     float4x4 projView;
     float4x4 model;
+    int step;
   } pushConst2M;
 
   float4x4 m_worldViewProj;
+  float4x4 m_oldWorldViewProj;
   float4x4 m_lightMatrix;    
 
+  int m_trembleStep = 0;
+
   UniformParams m_uniforms {};
+  UniformParamsForTemporal m_uniformsTemporal {};
+
   void* m_uboMappedMem = nullptr;
+  void* m_uboMappedMemTemporal = nullptr;
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
   etna::GraphicsPipeline m_multisamplingPipeline {};
+  etna::GraphicsPipeline m_temporalPipeline {};
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
 
@@ -90,6 +100,7 @@ private:
   uint32_t m_height = 1024u;
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
+  bool m_temporal_first_frame = true;
 
   enum class AAMethod { Nothing, SuperSampling, MultiSampling, Temporal };
   AAMethod m_antialisingMethod = AAMethod::Nothing;
@@ -138,7 +149,8 @@ private:
   void BuildNoAA(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
   void BuildSupersampling(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
   void BuildMultisampling(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
-
+  void BuildTemporal(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
+  void CopyImageCmd(VkCommandBuffer a_cmdBuff, VkImage from, VkImage to, VkImageAspectFlagBits aspectMask);
   void DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout = VK_NULL_HANDLE);
 
   void loadShaders();

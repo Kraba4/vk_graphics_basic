@@ -51,4 +51,15 @@ struct UniformParams
   shader_bool  animateLightColor;
 };
 
+struct UniformParamsForTemporal
+{
+  shader_mat4  lightMatrix;
+  shader_mat4  oldProjView;
+  shader_vec3  lightPos;
+  shader_float time;
+  shader_vec3  baseColor;
+  shader_bool  animateLightColor;
+  shader_uint  penultTrembleStep;
+};
+
 #endif // VK_GRAPHICS_BASIC_COMMON_H

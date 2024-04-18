@@ -12,6 +12,7 @@ layout(push_constant) uniform params_t
 {
     mat4 mProjView;
     mat4 mModel;
+    int trembleStep;
 } params;
 
 
@@ -25,6 +26,17 @@ layout (location = 0 ) out VS_OUT
 } vOut;
 
 out gl_PerVertex { vec4 gl_Position; };
+const float trembleStepSizeX = 1/1024.0/2.0;
+const float trembleStepSizeY = 1/1024.0/2.0;
+vec4 tremble_offsets[] = { vec4(0, trembleStepSizeY * 1.5, 0, 0),
+                  vec4(trembleStepSizeX, trembleStepSizeY, 0, 0), vec4(trembleStepSizeX * 1.5, 0, 0, 0),
+                  vec4(trembleStepSizeX, -trembleStepSizeY, 0, 0), vec4(0, -trembleStepSizeX * 1.5, 0, 0),
+                  vec4(-trembleStepSizeX, -trembleStepSizeY, 0, 0), vec4(-trembleStepSizeX * 1.5, 0, 0, 0),
+                  vec4(-trembleStepSizeX, trembleStepSizeY, 0, 0)};
+// vec4 tremble_offsets[] = {vec4(0, 0, 0, 0), 
+// float random(vec3 pos){
+//     return fract(sin(dot(pos, vec3(64.25375463, 23.27536534, 86.29678483))) * 59482.7542);
+// }
 void main(void)
 {
     const vec4 wNorm = vec4(DecodeNormal(floatBitsToInt(vPosNorm.w)),         0.0f);
@@ -36,4 +48,6 @@ void main(void)
     vOut.texCoord = vTexCoordAndTang.xy;
 
     gl_Position   = params.mProjView * vec4(vOut.wPos, 1.0);
+    // gl_Position += vec4(trembleStepSizeX * random(vec3(params.trembleStep, vOut.wPos.xy)).x, trembleStepSizeX * random(vec3(vOut.wPos.zy, params.trembleStep)).x, 0, 0) * gl_Position.w;
+    gl_Position += tremble_offsets[params.trembleStep] * gl_Position.w;
 }
