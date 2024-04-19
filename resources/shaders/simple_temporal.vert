@@ -10,11 +10,11 @@ layout(location = 1) in vec4 vTexCoordAndTang;
 
 layout(push_constant) uniform params_t
 {
-    mat4 mProjView;
+    mat4 mProj;
+    mat4 mView;
     mat4 mModel;
-    int trembleStep;
+    int jitterStep;
 } params;
-
 
 layout (location = 0 ) out VS_OUT
 {
@@ -27,6 +27,20 @@ layout (location = 0 ) out VS_OUT
 
 out gl_PerVertex { vec4 gl_Position; };
 
+float halton(int base, int index)
+{
+	float result = 0.;
+	float f = 1.;
+	while (index > 0)
+	{
+		f = f / float(base);
+		result += f * float(index % base);
+		index = index / base; 
+	}
+	return result;
+}
+
+const float jitterStepSize = 1.0/600.0;
 void main(void)
 {
     const vec4 wNorm = vec4(DecodeNormal(floatBitsToInt(vPosNorm.w)),         0.0f);
@@ -37,5 +51,11 @@ void main(void)
     vOut.wTangent = normalize(mat3(transpose(inverse(params.mModel))) * wTang.xyz);
     vOut.texCoord = vTexCoordAndTang.xy;
 
-    gl_Position  = params.mProjView * vec4(vOut.wPos, 1.0);
+    const int stp = params.jitterStep;
+    const vec4 offset = vec4(vec2(halton(2, stp), halton(3, stp)) - 0.5, 0, 0) * jitterStepSize;
+    mat4 projection = params.mProj;
+    projection[2][0] += offset.x;
+    projection[2][1] += offset.y;
+
+    gl_Position  = projection * params.mView * vec4(vOut.wPos, 1.0);
 }

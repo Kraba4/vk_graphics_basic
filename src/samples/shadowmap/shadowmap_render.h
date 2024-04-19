@@ -51,6 +51,7 @@ private:
   etna::Image msaaMainViewDepth;
   etna::Image msaaMainView;
   etna::Image oldMainView[2];
+  etna::Image historyView;
   int64_t countOld = 0;
   etna::Image oldMainViewDepth;
   etna::Image shadowMap;
@@ -74,14 +75,21 @@ private:
   {
     float4x4 projView;
     float4x4 model;
-    int step;
   } pushConst2M;
+
+  struct
+  {
+    float4x4 Proj;
+    float4x4 View;
+    float4x4 model;
+    int step;
+  } pushConstTemporal;
 
   float4x4 m_worldViewProj;
   float4x4 m_oldWorldViewProj;
   float4x4 m_lightMatrix;    
 
-  int m_trembleStep = 0;
+  int m_jitterStep = 0;
 
   UniformParams m_uniforms {};
   UniformParamsForTemporal m_uniformsTemporal {};
@@ -93,6 +101,8 @@ private:
   etna::GraphicsPipeline m_shadowPipeline {};
   etna::GraphicsPipeline m_multisamplingPipeline {};
   etna::GraphicsPipeline m_temporalPipeline {};
+  etna::GraphicsPipeline m_blendPipeline {};
+  etna::GraphicsPipeline m_basicForwardForOldViewPipeline{};
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
 
@@ -153,7 +163,7 @@ private:
   void BuildTemporal(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
   void CopyImageCmd(VkCommandBuffer a_cmdBuff, VkImage from, VkImage to, VkImageAspectFlagBits aspectMask);
   void DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout = VK_NULL_HANDLE);
-
+  void DrawSceneCmdTemporal(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout);
   void loadShaders();
 
   void SetupSimplePipeline();

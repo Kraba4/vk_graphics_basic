@@ -22,7 +22,8 @@ void SimpleShadowmapRender::UpdateView()
   auto mWorldViewProj = mProjFix * mProj * mLookAt;
   
   m_worldViewProj = mWorldViewProj;
-  
+  pushConstTemporal.Proj = mProjFix * mProj;
+  pushConstTemporal.View = mLookAt;
   ///// calc light matrix
   //
   if(m_light.usePerspectiveM)
@@ -51,9 +52,6 @@ void SimpleShadowmapRender::UpdateUniformBuffer(float a_time)
   m_uniformsTemporal.oldProjView = m_oldWorldViewProj;
   m_uniformsTemporal.lightPos    = m_light.cam.pos; //LiteMath::float3(sinf(a_time), 1.0f, cosf(a_time));
   m_uniformsTemporal.time        = a_time;
-  m_uniformsTemporal.penultTrembleStep[0] = m_trembleStep == 0 ? 127 : m_trembleStep - 1;
-  m_uniformsTemporal.penultTrembleStep[1] = int(m_temporal_first_frame);
-  m_uniformsTemporal.ProjView = m_worldViewProj;
   memcpy(m_uboMappedMemTemporal, &m_uniformsTemporal, sizeof(m_uniformsTemporal));
 
 }
