@@ -5,6 +5,7 @@
 #include "common.h"
 
 layout(location = 0) out vec4 out_fragColor;
+layout(location = 1) out vec4 out_ambient;
 
 layout (location = 0 ) in VS_OUT
 {
@@ -20,6 +21,12 @@ layout(binding = 0, set = 0) uniform AppData
 };
 
 layout (binding = 1) uniform sampler2D shadowMap;
+layout (binding = 2) uniform sampler2D depth;
+
+
+float random(vec3 pos){
+    return fract(sin(dot(pos, vec3(64.25375463, 23.27536534, 86.29678483))) * 59482.7542) - 0.5;
+}
 
 void main()
 {
@@ -39,4 +46,25 @@ void main()
   vec3 lightDir   = normalize(Params.lightPos - surf.wPos);
   vec4 lightColor = max(dot(surf.wNorm, lightDir), 0.0f) * lightColor1;
   out_fragColor   = (lightColor*shadow + vec4(0.1f)) * vec4(Params.baseColor, 1.0f);
+
+  vec3 norm = normalize(surf.wNorm);
+  vec3 tangent = normalize(surf.wTangent);
+  vec3 bitangent = cross(norm, tangent);
+
+  const int NUM_SAMPLES = 12;
+  const float MAX_SAMPLE_DIST = 0.07f;
+  float illuminatedSamplesCount = 0;
+  for (int i = 0; i < NUM_SAMPLES; ++i) {
+    vec3 seed = surf.wPos;
+    vec3 pointToSample = surf.wPos + MAX_SAMPLE_DIST * (abs(random(seed + vec3(i, 0, 0))) * norm + random(seed + vec3(0, i, 0)) * tangent +  random(seed + vec3(0, 0, i)) * bitangent);
+    const vec4 posSampleClipSpace = Params.projectionViewMatrix * vec4(pointToSample, 1.0f);
+    const vec3 posSampleSpaceNDC = posSampleClipSpace.xyz/posSampleClipSpace.w;
+    const vec2 sampleTexCoord    = posSampleSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);
+    const float viewDepth = textureLod(depth, sampleTexCoord, 0).x;
+    if (posSampleClipSpace.z < viewDepth + 0.005f || posSampleClipSpace.z - viewDepth > 0.15) {
+      illuminatedSamplesCount += 1.0;
+    }
+  }
+  const float ambient = illuminatedSamplesCount / NUM_SAMPLES;
+  out_ambient = vec4(ambient, 0, 0, 0);
 }

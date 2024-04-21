@@ -46,6 +46,9 @@ public:
 private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
+  etna::Image depthToSample;
+  etna::Image ambientOcclusionImage;
+  etna::Image mainViewColor;
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
@@ -77,7 +80,8 @@ private:
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
-  
+  etna::GraphicsPipeline m_depthPipeline {};
+  etna::GraphicsPipeline m_smoothAndBlendPipeline {};
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
 
@@ -125,6 +129,8 @@ private:
   } m_light;
  
   void DrawFrameSimple(bool draw_gui);
+
+  void CopyImageCmd(VkCommandBuffer a_cmdBuff, VkImage from, VkImage to, VkImageAspectFlagBits aspectMask);
 
   void BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
 
