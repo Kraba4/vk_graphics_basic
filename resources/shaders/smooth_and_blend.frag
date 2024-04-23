@@ -20,48 +20,37 @@ layout (location = 0) in VS_OUT
 vec3 kernel[3] = { vec3(1.0, 1.0, 1.0), vec3(1.0, 1.0, 1.0), vec3(1.0, 1.0, 1.0)};
 void main()
 {
-    ivec2 cord = ivec2((surf.texCoord) * 1024.0) - 1;
+    ivec2 cord = ivec2((surf.texCoord) * 1024.0);
     const int half_size = 1;
-    // const int left_x = max(cord.x - half_size, 0);
-    // const int right_x = min(cord.x + half_size, 1023);
+    const int left_x = max(cord.x - half_size, 0);
+    const int right_x = min(cord.x + half_size, 1023);
 
-    // const int up_y = max(cord.y - half_size, 0);
-    // const int down_y = min(cord.y + half_size, 1023);
+    const int up_y = max(cord.y - half_size, 0);
+    const int down_y = min(cord.y + half_size, 1023);
 
-    // vec4 minColor = vec4(1);
-    // vec4 maxColor = vec4(0);
-    float sum = 0;
-    // for (int i = 0; i <= 2; ++i) {
-    //    sum += kernel[i].x * texelFetch(ambientImage, cord + ivec2(i, 0), 0).x + 
-    //           kernel[i].y * texelFetch(ambientImage, cord + ivec2(i, 1), 0).x + 
-    //           kernel[i].z * texelFetch(ambientImage, cord + ivec2(i, 2), 0).x;
-    // }
-    // sum /= 9;
     vec4 minColor = vec4(1);
     vec4 maxColor = vec4(0);
 
-    for (int i = 0; i < 3; ++i) {
-      for (int j = 0; j < 3; ++j) {
-        sum += texelFetch(ambientImage, cord + ivec2(i, j), 0).x;
-        minColor = min(minColor, texelFetch(ambientImage, cord + ivec2(i, j), 0).x);
-        maxColor = max(maxColor, texelFetch(ambientImage, cord + ivec2(i, j), 0).x);
-      }
+    for (int i = up_y; i <= down_y; ++i) {
+        for (int j = left_x; j <= right_x; ++j) {
+            vec4 texel = texelFetch(ambientImage, ivec2(j, i), 0);
+            minColor = min(minColor, texel);
+            maxColor = max(maxColor, texel);
+        }
     }
-    sum /= 9;
-    cord += 1;
-    // vec4 historyTexel = texelFetch(historyColor, cord, 0);
-    // historyTexel = clamp(historyTexel, minColor, maxColor);
-    // vec4 historyTexel = texelFetch(historyAmbient, cord, 0);
-    // historyTexel = clamp(historyTexel, minColor, maxColor);
+    vec4 historyTexel = texelFetch(historyAmbient, cord, 0);
+    historyTexel = clamp(historyTexel, minColor, maxColor);
 
-    // float blendCoeff = 0.9;
-    // vec4 blendedColor = vec4(sum) * (1 - blendCoeff) + historyTexel * blendCoeff;
+    float blendCoeff = 0.9;
+    vec4 blendedColor = vec4(texelFetch(ambientImage, cord, 0)) * (1 - blendCoeff) + historyTexel * blendCoeff;
     // // out_sceneColor = vec4(blendedColor, 1);
     // // out_savedColor = vec4(blendedColor, 1);
-    // out_sceneColor = blendedColor;
+    // out_sceneColor = texelFetch(mainViewColor, cord, 0) * blendedColor.x;
+    out_sceneColor = blendedColor;
+    out_ambient = blendedColor;
     // out_ambient = blendedColor;
     // out_sceneColor = vec4(texelFetch(ambientImage, cord + 3, 0).x);
-    out_sceneColor = vec4(texelFetch(ambientImage, cord, 0).x);
+    // out_sceneColor = vec4(texelFetch(ambientImage, cord, 0).x);
     // out_sceneColor = vec4(1);
     // float r = 4.0;
     // float xs = 1024;
