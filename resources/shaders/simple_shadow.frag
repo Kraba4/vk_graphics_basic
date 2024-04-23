@@ -22,7 +22,7 @@ layout(binding = 0, set = 0) uniform AppData
 
 layout (binding = 1) uniform sampler2D shadowMap;
 layout (binding = 2) uniform sampler2D depth;
-
+layout (binding = 3) uniform sampler2D oldAmbient;
 
 float random(vec3 pos){
     return fract(sin(dot(pos, vec3(64.25375463, 23.27536534, 86.29678483))) * 59482.7542) - 0.5;
@@ -47,24 +47,44 @@ void main()
   vec4 lightColor = max(dot(surf.wNorm, lightDir), 0.0f) * lightColor1;
   out_fragColor   = (lightColor*shadow + vec4(0.1f)) * vec4(Params.baseColor, 1.0f);
 
-  vec3 norm = normalize(surf.wNorm);
-  vec3 tangent = normalize(surf.wTangent);
-  vec3 bitangent = cross(norm, tangent);
+  // vec3 norm = normalize(surf.wNorm);
+  // vec3 tangent = normalize(surf.wTangent);
+  // vec3 bitangent = cross(norm, tangent);
 
-  const int NUM_SAMPLES = 12;
-  const float MAX_SAMPLE_DIST = 0.07f;
-  float illuminatedSamplesCount = 0;
-  for (int i = 0; i < NUM_SAMPLES; ++i) {
-    vec3 seed = surf.wPos;
-    vec3 pointToSample = surf.wPos + MAX_SAMPLE_DIST * (abs(random(seed + vec3(i, 0, 0))) * norm + random(seed + vec3(0, i, 0)) * tangent +  random(seed + vec3(0, 0, i)) * bitangent);
-    const vec4 posSampleClipSpace = Params.projectionViewMatrix * vec4(pointToSample, 1.0f);
-    const vec3 posSampleSpaceNDC = posSampleClipSpace.xyz/posSampleClipSpace.w;
-    const vec2 sampleTexCoord    = posSampleSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);
-    const float viewDepth = textureLod(depth, sampleTexCoord, 0).x;
-    if (posSampleClipSpace.z < viewDepth + 0.005f || posSampleClipSpace.z - viewDepth > 0.15) {
-      illuminatedSamplesCount += 1.0;
-    }
+  // const int NUM_SAMPLES = 8;
+  // const float MAX_SAMPLE_DIST = 0.04f;
+  // float illuminatedSamplesCount = 0;
+  // for (int i = 0; i < NUM_SAMPLES; ++i) {
+  //   vec3 seed = surf.wPos + Params.eyeAndJitter.w / 5.0;
+  //   vec3 offset = normalize(abs(random(seed + vec3(i, 0, 0))) * norm + random(seed + vec3(0, i, 0)) * tangent +  random(seed + vec3(0, 0, i)) * bitangent);
+  //   offset *= float(i)/NUM_SAMPLES;
+  //   offset *= float(i)/NUM_SAMPLES;
+  //   vec3 pointToSample = surf.wPos + offset * MAX_SAMPLE_DIST;
+  //   const vec4 posSampleClipSpace = Params.projectionViewMatrix * vec4(pointToSample, 1.0f);
+  //   const vec3 posSampleSpaceNDC = posSampleClipSpace.xyz/posSampleClipSpace.w;
+  //   const vec2 sampleTexCoord    = posSampleSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);
+  //   const float viewDepth = textureLod(depth, sampleTexCoord, 0).x;
+  //   if (posSampleClipSpace.z < viewDepth + 0.005f) {
+  //     illuminatedSamplesCount += 1.0;
+  //   } else {
+  //     illuminatedSamplesCount += smoothstep(0, 0.15, posSampleClipSpace.z - viewDepth);
+  //   }
+  // }
+  // const float ambient = illuminatedSamplesCount / NUM_SAMPLES;
+  const vec4 posSampleClipSpace = Params.oldProjectionViewMatrix * vec4(surf.wPos, 1.0f);
+  const vec3 posSampleSpaceNDC = posSampleClipSpace.xyz/posSampleClipSpace.w;
+  const vec2 sampleTexCoord    = posSampleSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);
+  const vec4 oldFragAmbient = textureLod(oldAmbient, sampleTexCoord, 0);
+  const bool  outOfOldView = (sampleTexCoord.x < 0.0001f || sampleTexCoord.x > 0.9999f || sampleTexCoord.y < 0.0091f || sampleTexCoord.y > 0.9999f);
+  float blendCoeff = 0.9;
+  vec3 col = (lightColor*shadow + vec4(0.1f)).xyz * vec4(Params.baseColor, 1.0f).xyz;
+  if (outOfOldView) {
+    out_ambient = vec4(col, 1);
+  } else {
+    out_ambient = vec4(col * (1 - blendCoeff) + oldFragAmbient.xyz * blendCoeff, 1);
   }
-  const float ambient = illuminatedSamplesCount / NUM_SAMPLES;
-  out_ambient = vec4(ambient, 0, 0, 0);
+  // out_historyAmbient = textureLod(oldAmbient, sampleTexCoord, 0);
+  // out_fragColor = vec4(out_ambient.w);
+  out_fragColor   = out_ambient;
+
 }

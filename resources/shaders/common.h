@@ -50,6 +50,8 @@ struct UniformParams
   shader_vec3  baseColor;
   shader_bool  animateLightColor;
   shader_mat4  projectionViewMatrix;
+  shader_mat4  oldProjectionViewMatrix;
+  shader_vec4  eyeAndJitter;
 };
 
 #endif // VK_GRAPHICS_BASIC_COMMON_H

@@ -5,10 +5,11 @@
 #include "common.h"
 
 layout(location = 0) out vec4 out_sceneColor;
-
+layout(location = 1) out vec4 out_ambient;
 
 layout (binding = 0) uniform sampler2D ambientImage;
 layout (binding = 1) uniform sampler2D mainViewColor;
+layout (binding = 2) uniform sampler2D historyAmbient;
 
 layout (location = 0) in VS_OUT
 {
@@ -19,7 +20,7 @@ layout (location = 0) in VS_OUT
 vec3 kernel[3] = { vec3(1.0, 1.0, 1.0), vec3(1.0, 1.0, 1.0), vec3(1.0, 1.0, 1.0)};
 void main()
 {
-    ivec2 cord = ivec2((surf.texCoord) * 1024.0) - 3;
+    ivec2 cord = ivec2((surf.texCoord) * 1024.0) - 1;
     const int half_size = 1;
     // const int left_x = max(cord.x - half_size, 0);
     // const int right_x = min(cord.x + half_size, 1023);
@@ -36,23 +37,31 @@ void main()
     //           kernel[i].z * texelFetch(ambientImage, cord + ivec2(i, 2), 0).x;
     // }
     // sum /= 9;
-    for (int i = 0; i <= 6; ++i) {
-      for (int j = 0; j <= 6; ++j) {
+    vec4 minColor = vec4(1);
+    vec4 maxColor = vec4(0);
+
+    for (int i = 0; i < 3; ++i) {
+      for (int j = 0; j < 3; ++j) {
         sum += texelFetch(ambientImage, cord + ivec2(i, j), 0).x;
+        minColor = min(minColor, texelFetch(ambientImage, cord + ivec2(i, j), 0).x);
+        maxColor = max(maxColor, texelFetch(ambientImage, cord + ivec2(i, j), 0).x);
       }
     }
-    sum /= 49;
+    sum /= 9;
+    cord += 1;
     // vec4 historyTexel = texelFetch(historyColor, cord, 0);
     // historyTexel = clamp(historyTexel, minColor, maxColor);
-    
+    // vec4 historyTexel = texelFetch(historyAmbient, cord, 0);
+    // historyTexel = clamp(historyTexel, minColor, maxColor);
+
     // float blendCoeff = 0.9;
-    // vec3 blendedColor = texelFetch(sceneColor, cord, 0).xyz * (1 - blendCoeff) + historyTexel.xyz * blendCoeff;
-    // out_sceneColor = vec4(blendedColor, 1);
-    // out_savedColor = vec4(blendedColor, 1);
-    // out_sceneColor += vec4(sum);
-  
-    out_sceneColor = texelFetch(mainViewColor, cord + 3, 0) * sum;
-    // out_sceneColor = vec4(texelFetch(ambientImage, cord, 0).x);
+    // vec4 blendedColor = vec4(sum) * (1 - blendCoeff) + historyTexel * blendCoeff;
+    // // out_sceneColor = vec4(blendedColor, 1);
+    // // out_savedColor = vec4(blendedColor, 1);
+    // out_sceneColor = blendedColor;
+    // out_ambient = blendedColor;
+    // out_sceneColor = vec4(texelFetch(ambientImage, cord + 3, 0).x);
+    out_sceneColor = vec4(texelFetch(ambientImage, cord, 0).x);
     // out_sceneColor = vec4(1);
     // float r = 4.0;
     // float xs = 1024;

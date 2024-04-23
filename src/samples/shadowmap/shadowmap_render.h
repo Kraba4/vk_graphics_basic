@@ -47,8 +47,11 @@ private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
   etna::Image depthToSample;
+  etna::Image oldDepth;
   etna::Image ambientOcclusionImage;
   etna::Image mainViewColor;
+  etna::Image oldAmbient1;
+  etna::Image oldAmbient2;
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
