@@ -34,9 +34,6 @@ void main()
     for (int i = up_y; i <= down_y; ++i) {
         for (int j = left_x; j <= right_x; ++j) {
             vec4 texel = texelFetch(ambientImage, ivec2(j, i), 0);
-            if (texel.z == 0.0) {
-              texel.x = 1.0;
-            }
             minColor = min(minColor, texel);
             maxColor = max(maxColor, texel);
             sumNew += texel.x;
@@ -48,7 +45,7 @@ void main()
     sumOld /= (down_y - up_y + 1) * (right_x - left_x + 1);
     // vec4 historyTexel = texelFetch(historyAmbient, cord, 0);
     float historyTexel = clamp(sumOld, minColor.x, maxColor.x);
-    
+
     float blendCoeff = 0.9;
     // vec3 blendedColor = texelFetch(ambientImage, cord, 0).xyz * (1 - blendCoeff) + historyTexel.xyz * blendCoeff;
     vec3 blendedColor = vec3(sumNew * (1 - blendCoeff) + historyTexel * blendCoeff);
@@ -57,8 +54,9 @@ void main()
     // out_sceneColor = texelFetch(mainViewColor, cord, 0) * blendedColor.x;
     
     out_ambient = vec4(blendedColor, 1);
+    out_sceneColor = out_ambient;
     // out_sceneColor =  texelFetch(mainViewColor, cord, 0) * out_ambient.x;
-    out_sceneColor = texelFetch(mainViewColor, cord, 0) * out_ambient;
+    // out_sceneColor = texelFetch(mainViewColor, cord, 0) * out_ambient;
     // out_sceneColor = vec4(texelFetch(ambientImage, cord + 3, 0).x);
     // out_sceneColor = vec4(texelFetch(ambientImage, cord, 0).x);
 

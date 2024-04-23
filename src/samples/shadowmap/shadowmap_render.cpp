@@ -43,24 +43,24 @@ void SimpleShadowmapRender::AllocateResources()
   {
     .extent = vk::Extent3D{m_width, m_height, 1},
     .name = "ambient_occlusion",
-    .format = vk::Format::eR32G32B32A32Sfloat,
-    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc
+    .format = vk::Format::eR16G16B16A16Unorm,
+    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
   });
 
   oldAmbient1 = m_context->createImage(etna::Image::CreateInfo
   {
     .extent = vk::Extent3D{m_width, m_height, 1},
     .name = "old_ambient_occlusion1",
-    .format = vk::Format::eR32G32B32A32Sfloat,
-    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst
+    .format = vk::Format::eR16G16B16A16Unorm,
+    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
   });
 
   oldAmbient2 = m_context->createImage(etna::Image::CreateInfo
   {
     .extent = vk::Extent3D{m_width, m_height, 1},
     .name = "old_ambient_occlusion2",
-    .format = vk::Format::eR32G32B32A32Sfloat,
-    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst
+    .format = vk::Format::eR16G16B16A16Unorm,
+    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
   });
 
   mainViewColor = m_context->createImage(etna::Image::CreateInfo
@@ -143,6 +143,10 @@ void SimpleShadowmapRender::loadShaders()
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/distance.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
   etna::create_program("smooth_and_blend", 
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/smooth_and_blend.frag.spv",VK_GRAPHICS_BASIC_ROOT"/resources/shaders/quad3.vert.spv"});
+  etna::create_program("smooth_and_blend2", 
+    {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/smooth_and_blend2.frag.spv",VK_GRAPHICS_BASIC_ROOT"/resources/shaders/quad3.vert.spv"});
+  etna::create_program("smooth_and_blend3", 
+    {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/smooth_and_blend3.frag.spv",VK_GRAPHICS_BASIC_ROOT"/resources/shaders/quad3.vert.spv"});
 }
 
 void SimpleShadowmapRender::SetupSimplePipeline()
@@ -194,7 +198,7 @@ void SimpleShadowmapRender::SetupSimplePipeline()
       },
       .fragmentShaderOutput =
         {
-          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat()),  vk::Format::eR32G32B32A32Sfloat,  vk::Format::eR32G32B32A32Sfloat},
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat()),  vk::Format::eR16G16B16A16Unorm,  vk::Format::eR16G16B16A16Unorm},
           .depthAttachmentFormat = vk::Format::eD32Sfloat
         }
     });
@@ -236,7 +240,58 @@ void SimpleShadowmapRender::SetupSimplePipeline()
       },
       .fragmentShaderOutput =
         {
-          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat()),  vk::Format::eR32G32B32A32Sfloat},
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat()),  vk::Format::eR16G16B16A16Unorm},
+          .depthAttachmentFormat = vk::Format::eD32Sfloat
+        }
+    });
+    m_smoothAndBlendPipeline2 = pipelineManager.createGraphicsPipeline("smooth_and_blend2",
+    {
+      .blendingConfig = {
+        .attachments = {
+        vk::PipelineColorBlendAttachmentState{
+          .blendEnable = vk::False,
+          // Which color channels should we write to?
+          .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+            vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+        },
+        vk::PipelineColorBlendAttachmentState{
+          .blendEnable = vk::False,
+          // Which color channels should we write to?
+          .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+            vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+        }
+        },
+        .logicOp = vk::LogicOp::eNoOp
+      },
+      .fragmentShaderOutput =
+        {
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat()),  vk::Format::eR16G16B16A16Unorm},
+          .depthAttachmentFormat = vk::Format::eD32Sfloat
+        }
+    });
+
+     m_smoothAndBlendPipeline3 = pipelineManager.createGraphicsPipeline("smooth_and_blend3",
+    {
+      .blendingConfig = {
+        .attachments = {
+        vk::PipelineColorBlendAttachmentState{
+          .blendEnable = vk::False,
+          // Which color channels should we write to?
+          .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+            vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+        },
+        vk::PipelineColorBlendAttachmentState{
+          .blendEnable = vk::False,
+          // Which color channels should we write to?
+          .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+            vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+        }
+        },
+        .logicOp = vk::LogicOp::eNoOp
+      },
+      .fragmentShaderOutput =
+        {
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat()),  vk::Format::eR16G16B16A16Unorm},
           .depthAttachmentFormat = vk::Format::eD32Sfloat
         }
     });
@@ -305,7 +360,6 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
   VK_CHECK_RESULT(vkBeginCommandBuffer(a_cmdBuff, &beginInfo));
-
   //// draw scene to shadowmap
   //
   {
@@ -344,7 +398,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
       {{.image = mainViewColor.get(), .view = mainViewColor.getView({})}, {.image = ambientOcclusionImage.get(), .view = ambientOcclusionImage.getView({})},
-       {.image = oldAmbient2.get(), .view = oldAmbient2.getView({})}},
+      {.image = oldAmbient2.get(), .view = oldAmbient2.getView({})}},
       {.image = mainViewDepth.get(), .view = mainViewDepth.getView({}), .loadOp = vk::AttachmentLoadOp::eLoad});
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_basicForwardPipeline.getVkPipeline());
@@ -357,32 +411,76 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   // {
   //   CopyImageCmd(a_cmdBuff, ambientOcclusionImage.get(), oldAmbient1.get(), VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT);
   // }
-
-  //// smooth ambient occlusion add it on final image
-  
-  {
-    auto simpleMaterialInfo = etna::get_shader_program("smooth_and_blend");
-
-    auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
+  if (m_aoMode == AOMode::AOandScene) {
+    //// smooth ambient occlusion add it on final image
+    
     {
-      etna::Binding {0, ambientOcclusionImage.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-      etna::Binding {1, mainViewColor.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-      etna::Binding {2, oldAmbient2.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
-    });
+      auto simpleMaterialInfo = etna::get_shader_program("smooth_and_blend");
 
-    VkDescriptorSet vkSet = set.getVkSet();
+      auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, ambientOcclusionImage.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {1, mainViewColor.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {2, oldAmbient2.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
+      });
 
-    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
-      {{.image = a_targetImage, .view = a_targetImageView}, {.image = oldAmbient1.get(), .view = oldAmbient1.getView({})}},
-      {});
+      VkDescriptorSet vkSet = set.getVkSet();
 
-    vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_smoothAndBlendPipeline.getVkPipeline());
-    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      m_smoothAndBlendPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+      etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
+        {{.image = a_targetImage, .view = a_targetImageView}, {.image = oldAmbient1.get(), .view = oldAmbient1.getView({})}},
+        {});
 
-    vkCmdDraw(a_cmdBuff, 3, 1, 0, 0);
+      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_smoothAndBlendPipeline.getVkPipeline());
+      vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        m_smoothAndBlendPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+
+      vkCmdDraw(a_cmdBuff, 3, 1, 0, 0);
+    }
+  } else if (m_aoMode == AOMode::OnlyAO) {
+    {
+      auto simpleMaterialInfo = etna::get_shader_program("smooth_and_blend2");
+
+      auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, ambientOcclusionImage.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {1, mainViewColor.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {2, oldAmbient2.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
+      });
+
+      VkDescriptorSet vkSet = set.getVkSet();
+
+      etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
+        {{.image = a_targetImage, .view = a_targetImageView}, {.image = oldAmbient1.get(), .view = oldAmbient1.getView({})}},
+        {});
+
+      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_smoothAndBlendPipeline2.getVkPipeline());
+      vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        m_smoothAndBlendPipeline2.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+
+      vkCmdDraw(a_cmdBuff, 3, 1, 0, 0);
+    }
+  } else {
+    auto simpleMaterialInfo = etna::get_shader_program("smooth_and_blend3");
+
+      auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, ambientOcclusionImage.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {1, mainViewColor.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+        etna::Binding {2, oldAmbient2.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
+      });
+
+      VkDescriptorSet vkSet = set.getVkSet();
+
+      etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
+        {{.image = a_targetImage, .view = a_targetImageView}, {.image = oldAmbient1.get(), .view = oldAmbient1.getView({})}},
+        {});
+
+      vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_smoothAndBlendPipeline3.getVkPipeline());
+      vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        m_smoothAndBlendPipeline3.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+
+      vkCmdDraw(a_cmdBuff, 3, 1, 0, 0);
   }
-  m_uniforms.oldProjectionViewMatrix = m_worldViewProj;
   if(m_input.drawFSQuad)
     m_pQuad->RecordCommands(a_cmdBuff, a_targetImage, a_targetImageView, shadowMap, defaultSampler);
 

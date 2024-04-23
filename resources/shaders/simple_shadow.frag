@@ -52,31 +52,35 @@ void main()
   vec3 tangent = normalize(surf.wTangent);
   vec3 bitangent = cross(norm, tangent);
 
-  const int NUM_SAMPLES = 8;
-  const float MAX_SAMPLE_DIST = 0.04f;
+  const int NUM_SAMPLES = 16;
+  const float MAX_SAMPLE_DIST = 0.035f;
   float illuminatedSamplesCount = 0;
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     vec3 seed = surf.wPos + Params.eyeAndJitter.w / 5.0;
     vec3 offset = normalize(abs(random(seed + vec3(i, 0, 0))) * norm + random(seed + vec3(0, i, 0)) * tangent +  random(seed + vec3(0, 0, i)) * bitangent);
     offset *= float(i)/NUM_SAMPLES;
-    // offset *= float(i)/NUM_SAMPLES;
+    offset *= float(i)/NUM_SAMPLES;
     vec3 pointToSample = surf.wPos + offset * MAX_SAMPLE_DIST;
     const vec4 posSampleClipSpace = Params.projectionViewMatrix * vec4(pointToSample, 1.0f);
     const vec3 posSampleSpaceNDC = posSampleClipSpace.xyz/posSampleClipSpace.w;
     const vec2 sampleTexCoord    = posSampleSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);
     const float viewDepth = textureLod(depth, sampleTexCoord, 0).x;
-    if (posSampleClipSpace.z < viewDepth + 0.005f) {
+    if (posSampleClipSpace.z < viewDepth + 0.005f ) {
       illuminatedSamplesCount += 1.0;
     } else {
       illuminatedSamplesCount += smoothstep(0, 0.15, posSampleClipSpace.z - viewDepth);
     }
   }
-  const float ambient = illuminatedSamplesCount / NUM_SAMPLES;
-  const vec4 posSampleClipSpace = Params.oldProjectionViewMatrix * vec4(surf.wPos, 1.0f);
-  const vec3 posSampleSpaceNDC = posSampleClipSpace.xyz/posSampleClipSpace.w;
-  const vec2 sampleTexCoord    = posSampleSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);
-  const vec4 oldFragAmbient = textureLod(oldAmbient, sampleTexCoord, 0);
-  // const bool  outOfOldView = (sampleTexCoord.x < 0.0001f || sampleTexCoord.x > 0.9999f || sampleTexCoord.y < 0.0091f || sampleTexCoord.y > 0.9999f);
+  float ambient = illuminatedSamplesCount / NUM_SAMPLES;
+  // if (ambient > 0.0) {}
+  // if (shadow == 0.0) {
+  //   ambient = 1.0;
+  // }
+  const vec4 posOldClipSpace = Params.oldProjectionViewMatrix * vec4(surf.wPos, 1.0f);
+  const vec3 posOldSpaceNDC = posOldClipSpace.xyz/posOldClipSpace.w;
+  const vec2 oldTexCoord    = posOldSpaceNDC.xy*0.5f + vec2(0.5f, 0.5f);
+  const vec4 oldFragAmbient = textureLod(oldAmbient, oldTexCoord, 0);
+  const bool outOfOldView = (oldTexCoord.x < 0.0001f || oldTexCoord.x > 0.9999f || oldTexCoord.y < 0.0091f || oldTexCoord.y > 0.9999f);
   // float blendCoeff = 0.9;
   // vec3 col = (lightColor*shadow + vec4(0.1f)).xyz * vec4(Params.baseColor, 1.0f).xyz;
   // if (outOfOldView) {
@@ -86,8 +90,8 @@ void main()
   // }
   // out_historyAmbient = textureLod(oldAmbient, sampleTexCoord, 0);
   // out_fragColor = vec4(out_ambient.w);
-  out_ambient = out_fragColor;
-  out_historyAmbient = oldFragAmbient;
+  out_ambient = vec4(vec2(ambient), shadow, 1);
+  out_historyAmbient = outOfOldView ? vec4(vec3(ambient), 1) : oldFragAmbient;
   // out_fragColor   = out_ambient;
 
 }

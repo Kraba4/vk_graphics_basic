@@ -85,6 +85,8 @@ private:
   etna::GraphicsPipeline m_shadowPipeline {};
   etna::GraphicsPipeline m_depthPipeline {};
   etna::GraphicsPipeline m_smoothAndBlendPipeline {};
+  etna::GraphicsPipeline m_smoothAndBlendPipeline2 {};
+  etna::GraphicsPipeline m_smoothAndBlendPipeline3 {};
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
 
@@ -93,6 +95,9 @@ private:
   uint32_t m_height = 1024u;
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
+  enum class AOMode { OnlyScene, AOandScene, OnlyAO, Temporal };
+  AOMode m_aoMode = AOMode::AOandScene;
+
 
   vk::PhysicalDeviceFeatures m_enabledDeviceFeatures = {};
   std::vector<const char*> m_deviceExtensions;
