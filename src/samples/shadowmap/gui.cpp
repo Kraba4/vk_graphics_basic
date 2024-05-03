@@ -13,6 +13,12 @@ void SimpleShadowmapRender::SetupGUIElements()
 
     ImGui::ColorEdit3("Meshes base color", m_uniforms.baseColor.M, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoInputs);
     ImGui::SliderFloat3("Light source position", m_uniforms.lightPos.M, -10.f, 10.f);
+    if (ImGui::RadioButton("Off",    m_toneMapping == ToneMappingVariant::No))     m_toneMapping = ToneMappingVariant::No;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Unreal", m_toneMapping == ToneMappingVariant::Unreal)) m_toneMapping = ToneMappingVariant::Unreal;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Filmic", m_toneMapping == ToneMappingVariant::Filmic)) m_toneMapping = ToneMappingVariant::Filmic;
+    ImGui::SliderFloat("Light brightness", &m_lightBrightness, 0.f, 10.f);
 
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 

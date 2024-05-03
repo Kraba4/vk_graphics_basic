@@ -46,6 +46,7 @@ public:
 private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
+  etna::Image hdrImage;
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
@@ -75,6 +76,7 @@ private:
   UniformParams m_uniforms {};
   void* m_uboMappedMem = nullptr;
 
+  etna::GraphicsPipeline m_toneMappingPipeline {};
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
   
@@ -86,6 +88,10 @@ private:
   uint32_t m_height = 1024u;
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
+  
+  enum class ToneMappingVariant { No, Unreal, Filmic};
+  ToneMappingVariant m_toneMapping = ToneMappingVariant::No;
+  float m_lightBrightness = 1.0f;
 
   vk::PhysicalDeviceFeatures m_enabledDeviceFeatures = {};
   std::vector<const char*> m_deviceExtensions;
