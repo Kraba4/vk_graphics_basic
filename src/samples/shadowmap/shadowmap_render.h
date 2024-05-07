@@ -47,6 +47,10 @@ private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
   etna::Image shadowMap;
+  etna::Image normalMap;
+  etna::Image posMap;
+  etna::Image oldIndirect[2];
+  etna::Image fluxMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
 
@@ -67,6 +71,7 @@ private:
   {
     float4x4 projView;
     float4x4 model;
+    uint32_t objectIndex;
   } pushConst2M;
 
   float4x4 m_worldViewProj;
@@ -86,6 +91,7 @@ private:
   uint32_t m_height = 1024u;
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
+  bool m_enableIndirectLightning = true;
 
   vk::PhysicalDeviceFeatures m_enabledDeviceFeatures = {};
   std::vector<const char*> m_deviceExtensions;
