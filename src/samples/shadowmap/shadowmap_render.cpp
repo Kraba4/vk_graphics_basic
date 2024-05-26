@@ -55,22 +55,6 @@ void SimpleShadowmapRender::AllocateResources()
     .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
   });
 
-  oldIndirect[0] = m_context->createImage(etna::Image::CreateInfo
-  {
-    .extent = vk::Extent3D{m_width, m_height, 1},
-    .name = "old_indirect0",
-    .format = vk::Format::eR16G16B16A16Sfloat,
-    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
-  });
-
-  oldIndirect[1] = m_context->createImage(etna::Image::CreateInfo
-  {
-    .extent = vk::Extent3D{m_width, m_height, 1},
-    .name = "old_indirect1",
-    .format = vk::Format::eR16G16B16A16Sfloat,
-    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
-  });
-
   defaultSampler = etna::Sampler(etna::Sampler::CreateInfo{.name = "default_sampler"});
   constants = m_context->createBuffer(etna::Buffer::CreateInfo
   {
@@ -155,19 +139,13 @@ void SimpleShadowmapRender::SetupSimplePipeline()
             // Which color channels should we write to?
             .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
               vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
-          },
-           vk::PipelineColorBlendAttachmentState{
-            .blendEnable = vk::False,
-            // Which color channels should we write to?
-            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-              vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
           }
         },
         .logicOp = vk::LogicOp::eNoOp
       },
       .fragmentShaderOutput =
         {
-          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat()), vk::Format::eR16G16B16A16Sfloat},
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
           .depthAttachmentFormat = vk::Format::eD32Sfloat
         }
     });
@@ -242,7 +220,6 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
   VK_CHECK_RESULT(vkBeginCommandBuffer(a_cmdBuff, &beginInfo));
-
   //// draw scene to shadowmap
   //
   {
@@ -253,7 +230,6 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
     DrawSceneCmd(a_cmdBuff, m_lightMatrix, m_shadowPipeline.getVkPipelineLayout());
   }
-  static uint64_t step = 0;
   //// draw final scene to screen
   //
   {
@@ -265,14 +241,13 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
       etna::Binding {1, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
       etna::Binding {2, normalMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
       etna::Binding {3, posMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-      etna::Binding {4, fluxMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-      etna::Binding {5, oldIndirect[step % 2].genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
+      etna::Binding {4, fluxMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
     });
 
     VkDescriptorSet vkSet = set.getVkSet();
 
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
-      {{a_targetImage, a_targetImageView}, {oldIndirect[(step + 1) % 2].get(), oldIndirect[(step + 1) % 2].getView({})}},
+      {{a_targetImage, a_targetImageView}},
       {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_basicForwardPipeline.getVkPipeline());
@@ -281,7 +256,6 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_basicForwardPipeline.getVkPipelineLayout());
   }
-  ++step;
   if(m_input.drawFSQuad)
     m_pQuad->RecordCommands(a_cmdBuff, a_targetImage, a_targetImageView, shadowMap, defaultSampler);
 

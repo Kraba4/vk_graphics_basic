@@ -49,7 +49,6 @@ private:
   etna::Image shadowMap;
   etna::Image normalMap;
   etna::Image posMap;
-  etna::Image oldIndirect[2];
   etna::Image fluxMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;

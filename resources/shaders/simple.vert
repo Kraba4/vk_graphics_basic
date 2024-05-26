@@ -46,7 +46,10 @@ void main(void)
     vOut.wNorm    = normalize(mat3(transpose(inverse(params.mModel))) * wNorm.xyz);
     vOut.wTangent = normalize(mat3(transpose(inverse(params.mModel))) * wTang.xyz);
     vOut.texCoord = vTexCoordAndTang.xy;
+    if (params.objectIndex == 0) {
+        vOut.color = vec3(0.2);
+    } else {
     vOut.color    = get_random_color(params.objectIndex);
-
+    }
     gl_Position   = params.mProjView * vec4(vOut.wPos, 1.0);
 }
