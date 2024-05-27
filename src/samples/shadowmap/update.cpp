@@ -44,7 +44,10 @@ void SimpleShadowmapRender::UpdateUniformBuffer(float a_time)
   m_uniforms.lightMatrix = m_lightMatrix;
   m_uniforms.lightPos    = m_light.cam.pos; //LiteMath::float3(sinf(a_time), 1.0f, cosf(a_time));
   m_uniforms.time        = a_time;
-
+  m_uniforms.viewPos     = shader_vec4(m_cam.pos.x, m_cam.pos.y, m_cam.pos.z, 1.0f);
+  m_uniforms.enableSubsurfaceScattering = m_enableSubsurfaceScattering;
+  m_uniforms.ssParams = shader_vec4(m_soften, m_linearAttenuation, m_falloffPower, m_lightSharpness);
+  
   memcpy(m_uboMappedMem, &m_uniforms, sizeof(m_uniforms));
 }
 

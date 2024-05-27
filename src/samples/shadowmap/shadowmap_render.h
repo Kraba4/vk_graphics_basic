@@ -67,6 +67,7 @@ private:
   {
     float4x4 projView;
     float4x4 model;
+    int objectIndex;
   } pushConst2M;
 
   float4x4 m_worldViewProj;
@@ -86,6 +87,11 @@ private:
   uint32_t m_height = 1024u;
   uint32_t m_framesInFlight = 2u;
   bool m_vsync = false;
+  bool m_enableSubsurfaceScattering = true;
+  float m_soften = 0.05;
+  float m_linearAttenuation = 0.48;
+  float m_falloffPower = 5.00;
+  float m_lightSharpness = 20.0;
 
   vk::PhysicalDeviceFeatures m_enabledDeviceFeatures = {};
   std::vector<const char*> m_deviceExtensions;

@@ -90,7 +90,8 @@ void SimpleShadowmapRender::loadShaders()
 {
   etna::create_program("simple_material",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
-  etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
+  etna::create_program("shadow_material", 
+    {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
 }
 
 void SimpleShadowmapRender::SetupSimplePipeline()
@@ -113,11 +114,12 @@ void SimpleShadowmapRender::SetupSimplePipeline()
           .depthAttachmentFormat = vk::Format::eD32Sfloat
         }
     });
-  m_shadowPipeline = pipelineManager.createGraphicsPipeline("simple_shadow",
+  m_shadowPipeline = pipelineManager.createGraphicsPipeline("shadow_material",
     {
       .vertexShaderInput = sceneVertexInputDesc,
       .fragmentShaderOutput =
         {
+          .colorAttachmentFormats = {},
           .depthAttachmentFormat = vk::Format::eD16Unorm
         }
     });
@@ -142,6 +144,7 @@ void SimpleShadowmapRender::DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4
   {
     auto inst         = m_pScnMgr->GetInstanceInfo(i);
     pushConst2M.model = m_pScnMgr->GetInstanceMatrix(i);
+    pushConst2M.objectIndex = i; 
     vkCmdPushConstants(a_cmdBuff, a_pipelineLayout,
       stageFlags, 0, sizeof(pushConst2M), &pushConst2M);
 
@@ -159,16 +162,16 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
   VK_CHECK_RESULT(vkBeginCommandBuffer(a_cmdBuff, &beginInfo));
-
   //// draw scene to shadowmap
   //
   {
-    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, 2048, 2048}, {}, {.image = shadowMap.get(), .view = shadowMap.getView({})});
+    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, 2048, 2048}, 
+    {}, 
+    {.image = shadowMap.get(), .view = shadowMap.getView({})});
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowPipeline.getVkPipeline());
     DrawSceneCmd(a_cmdBuff, m_lightMatrix, m_shadowPipeline.getVkPipelineLayout());
   }
-
   //// draw final scene to screen
   //
   {
@@ -183,7 +186,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     VkDescriptorSet vkSet = set.getVkSet();
 
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
-      {{.image = a_targetImage, .view = a_targetImageView}},
+      {{a_targetImage, a_targetImageView}},
       {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_basicForwardPipeline.getVkPipeline());
@@ -192,7 +195,6 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_basicForwardPipeline.getVkPipelineLayout());
   }
-
   if(m_input.drawFSQuad)
     m_pQuad->RecordCommands(a_cmdBuff, a_targetImage, a_targetImageView, shadowMap, defaultSampler);
 

@@ -12,6 +12,7 @@ layout(push_constant) uniform params_t
 {
     mat4 mProjView;
     mat4 mModel;
+    uint objectIndex;
 } params;
 
 
@@ -20,11 +21,22 @@ layout (location = 0 ) out VS_OUT
     vec3 wPos;
     vec3 wNorm;
     vec3 wTangent;
-    vec2 texCoord;
-
+    vec3 color;
+    vec3 texCoord;
 } vOut;
 
 out gl_PerVertex { vec4 gl_Position; };
+
+vec3 get_random_color(uint x)
+{
+  x += 1u;
+  vec3 col = vec3(1.61803398875);
+  col = fract(col) * vec3(x,x,x);
+  col = fract(col) * vec3(1,x,x);
+  col = fract(col) * vec3(1,1,x);
+  return fract(col);
+}
+
 void main(void)
 {
     const vec4 wNorm = vec4(DecodeNormal(floatBitsToInt(vPosNorm.w)),         0.0f);
@@ -33,7 +45,9 @@ void main(void)
     vOut.wPos     = (params.mModel * vec4(vPosNorm.xyz, 1.0f)).xyz;
     vOut.wNorm    = normalize(mat3(transpose(inverse(params.mModel))) * wNorm.xyz);
     vOut.wTangent = normalize(mat3(transpose(inverse(params.mModel))) * wTang.xyz);
-    vOut.texCoord = vTexCoordAndTang.xy;
+    vOut.texCoord.xy = vTexCoordAndTang.xy;
+    vOut.color    = get_random_color(params.objectIndex);
+    vOut.texCoord.z = params.objectIndex;
 
     gl_Position   = params.mProjView * vec4(vOut.wPos, 1.0);
 }

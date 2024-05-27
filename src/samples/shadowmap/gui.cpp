@@ -13,7 +13,12 @@ void SimpleShadowmapRender::SetupGUIElements()
 
     ImGui::ColorEdit3("Meshes base color", m_uniforms.baseColor.M, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoInputs);
     ImGui::SliderFloat3("Light source position", m_uniforms.lightPos.M, -10.f, 10.f);
-
+    ImGui::Checkbox("Enable subsurface scattering", &m_enableSubsurfaceScattering);
+    ImGui::SliderFloat("Soften", &m_soften, 0, 1.0);
+    ImGui::SliderFloat("Linear attenuation", &m_linearAttenuation, 0, 1.0);
+    ImGui::SliderFloat("Falloff power", &m_falloffPower, 0, 20.0);
+    ImGui::SliderFloat("Light sharpness", &m_lightSharpness, 0, 100.0);
+    
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 
     ImGui::NewLine();
