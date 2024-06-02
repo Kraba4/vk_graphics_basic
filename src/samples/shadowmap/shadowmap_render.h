@@ -49,6 +49,8 @@ private:
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
+  etna::Buffer particles;
+  uint16_t nParticles = 100;
 
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
@@ -69,15 +71,35 @@ private:
     float4x4 model;
   } pushConst2M;
 
+  struct
+  {
+    uint16_t maxParticles;
+    uint16_t startPos;
+  } pushConstComputeSpawn;
+
+  struct
+  {
+    uint16_t dt;
+  } pushConstComputePhysics;
+
+  struct
+  {
+    float4x4 projView;
+    uint16_t index;
+  } pushConstParticles;
+
   float4x4 m_worldViewProj;
   float4x4 m_lightMatrix;    
-
+  uint16_t m_dt;
   UniformParams m_uniforms {};
   void* m_uboMappedMem = nullptr;
+  Particle* m_uboMappedParticles = nullptr;
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
-  
+  etna::GraphicsPipeline m_particlesPipeline {};
+  etna::ComputePipeline m_spawnParticles {};
+
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
 
@@ -129,6 +151,7 @@ private:
   void BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView);
 
   void DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout = VK_NULL_HANDLE);
+  void DrawParticlesCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout = VK_NULL_HANDLE);
 
   void loadShaders();
 

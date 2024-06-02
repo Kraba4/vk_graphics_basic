@@ -39,8 +39,19 @@ void SimpleShadowmapRender::AllocateResources()
     .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
     .name = "constants"
   });
+  
+  particles = m_context->createBuffer(etna::Buffer::CreateInfo
+  {
+    .size = sizeof(Particle) * nParticles,
+    .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+    .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+    .name = "particles"
+  });
+  pushConstComputeSpawn.maxParticles = nParticles;
+  pushConstComputeSpawn.startPos = 0;
 
   m_uboMappedMem = constants.map();
+  m_uboMappedParticles = reinterpret_cast<Particle*>(particles.map());
 }
 
 void SimpleShadowmapRender::LoadScene(const char* path, bool transpose_inst_matrices)
@@ -91,6 +102,10 @@ void SimpleShadowmapRender::loadShaders()
   etna::create_program("simple_material",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
   etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
+  etna::create_program("spawn_particles", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/spawn.comp.spv"});
+  etna::create_program("physics_particles", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/physics.comp.spv"});
+  etna::create_program("particles_material", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/particles.vert.spv", 
+                                            VK_GRAPHICS_BASIC_ROOT"/resources/shaders/particles.frag.spv"});
 }
 
 void SimpleShadowmapRender::SetupSimplePipeline()
@@ -118,6 +133,17 @@ void SimpleShadowmapRender::SetupSimplePipeline()
       .vertexShaderInput = sceneVertexInputDesc,
       .fragmentShaderOutput =
         {
+          .depthAttachmentFormat = vk::Format::eD16Unorm
+        }
+    });
+  m_spawnParticles = pipelineManager.createComputePipeline("spawn_particles", {});
+  m_spawnParticles = pipelineManager.createComputePipeline("physics_particles", {});
+
+  m_particlesPipeline = pipelineManager.createGraphicsPipeline("particles_material",
+    {
+      .fragmentShaderOutput =
+        {
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
           .depthAttachmentFormat = vk::Format::eD16Unorm
         }
     });
@@ -150,6 +176,19 @@ void SimpleShadowmapRender::DrawSceneCmd(VkCommandBuffer a_cmdBuff, const float4
   }
 }
 
+void SimpleShadowmapRender::DrawParticlesCmd(VkCommandBuffer a_cmdBuff, const float4x4& a_wvp, VkPipelineLayout a_pipelineLayout)
+{
+  VkShaderStageFlags stageFlags = (VK_SHADER_STAGE_VERTEX_BIT);
+  pushConstParticles.projView = a_wvp;
+  for (uint32_t i = 0; i < pushConstComputeSpawn.startPos; ++i)
+  {
+    pushConstParticles.index = i;
+    vkCmdPushConstants(a_cmdBuff, a_pipelineLayout,
+      stageFlags, 0, sizeof(pushConstParticles), &pushConstParticles);
+    vkCmdDraw(a_cmdBuff, 1, 1, 0, 0);
+  }
+}
+
 void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, VkImage a_targetImage, VkImageView a_targetImageView)
 {
   vkResetCommandBuffer(a_cmdBuff, 0);
@@ -160,6 +199,62 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
   VK_CHECK_RESULT(vkBeginCommandBuffer(a_cmdBuff, &beginInfo));
 
+  // compute spawn particles
+  {
+    auto simpleComputeInfo = etna::get_shader_program("spawn_particles");
+
+    auto set = etna::create_descriptor_set(simpleComputeInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, particles.genBinding()}
+      }
+    );
+
+    VkDescriptorSet vkSet = set.getVkSet();
+
+    vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_spawnParticles.getVkPipeline());
+    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_spawnParticles.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
+
+    uint16_t nNeedSpawn = 1;
+    pushConstComputeSpawn.maxParticles = nParticles;
+    pushConstComputeSpawn.startPos = (pushConstComputeSpawn.startPos + nNeedSpawn);
+    assert(pushConstComputeSpawn.startPos < nParticles);
+    vkCmdPushConstants(a_cmdBuff, m_spawnParticles.getVkPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstComputeSpawn), &pushConstComputeSpawn);
+
+    etna::flush_barriers(a_cmdBuff);
+
+    vkCmdDispatch(a_cmdBuff, nNeedSpawn, 1, 1);
+  }
+
+  // compute physics
+  {
+    auto simpleComputeInfo = etna::get_shader_program("physics_particles");
+
+    auto set = etna::create_descriptor_set(simpleComputeInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, particles.genBinding()}
+      }
+    );
+
+    VkDescriptorSet vkSet = set.getVkSet();
+
+    vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_spawnParticles.getVkPipeline());
+    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_spawnParticles.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
+
+    pushConstComputePhysics.dt = m_dt;
+    vkCmdPushConstants(a_cmdBuff, m_spawnParticles.getVkPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstComputePhysics), &pushConstComputePhysics);
+
+    etna::flush_barriers(a_cmdBuff);
+
+    vkCmdDispatch(a_cmdBuff, nParticles, 1, 1);
+  }
+
+  std::sort(m_uboMappedParticles, m_uboMappedParticles + nParticles, 
+    [](const Particle &p1, const Particle &p2) {
+      return p1.velocity.w < p2.velocity.w;
+    });
+
+  uint16_t nAliveParticles = std::lower_bound(m_uboMappedParticles, m_uboMappedParticles + nParticles, 1000000) - m_uboMappedParticles;
+  pushConstComputeSpawn.startPos = nAliveParticles;
   //// draw scene to shadowmap
   //
   {
@@ -191,6 +286,31 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
       m_basicForwardPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
 
     DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_basicForwardPipeline.getVkPipelineLayout());
+  }
+
+
+  //// draw particles
+  //
+  {
+    auto simpleMaterialInfo = etna::get_shader_program("particles_material");
+
+    auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
+    {
+      etna::Binding {0, constants.genBinding()},
+      etna::Binding {1, particles.genBinding()}
+    });
+
+    VkDescriptorSet vkSet = set.getVkSet();
+
+    etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
+      {{.image = a_targetImage, .view = a_targetImageView, .loadOp = vk::AttachmentLoadOp::eLoad}},
+      {.image = mainViewDepth.get(), .view = mainViewDepth.getView({}), .loadOp = vk::AttachmentLoadOp::eLoad});
+
+    vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_particlesPipeline.getVkPipeline());
+    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      m_particlesPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
+
+    DrawParticlesCmd(a_cmdBuff, m_worldViewProj, m_particlesPipeline.getVkPipelineLayout());
   }
 
   if(m_input.drawFSQuad)

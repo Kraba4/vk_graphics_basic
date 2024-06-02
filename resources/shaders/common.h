@@ -51,4 +51,10 @@ struct UniformParams
   shader_bool  animateLightColor;
 };
 
+struct Particle
+{
+  shader_vec4 positionAndTimeToLive;
+  shader_vec4 velocity;
+};
+
 #endif // VK_GRAPHICS_BASIC_COMMON_H
