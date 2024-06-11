@@ -76,6 +76,7 @@
         "typeinfo": "cpp",
         "variant": "cpp",
         "expected": "cpp",
-        "format": "cpp"
+        "format": "cpp",
+        "rope": "cpp"
     }
 }

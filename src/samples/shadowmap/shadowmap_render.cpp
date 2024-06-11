@@ -9,6 +9,8 @@
 #include <etna/Etna.hpp>
 #include <etna/RenderTargetStates.hpp>
 #include <vulkan/vulkan_core.h>
+#include "../../../external/glfw/include/GLFW/glfw3.h"
+#include <GLFW/glfw3.h>
 
 
 /// RESOURCE ALLOCATION
@@ -137,14 +139,33 @@ void SimpleShadowmapRender::SetupSimplePipeline()
         }
     });
   m_spawnParticles = pipelineManager.createComputePipeline("spawn_particles", {});
-  m_spawnParticles = pipelineManager.createComputePipeline("physics_particles", {});
+  m_physicsPipeline = pipelineManager.createComputePipeline("physics_particles", {});
 
   m_particlesPipeline = pipelineManager.createGraphicsPipeline("particles_material",
     {
+      .blendingConfig = {
+        // Should contain an element for every color attachment that
+        // your pixel shader will output to, i.e. for every output variable.
+        .attachments = {
+          vk::PipelineColorBlendAttachmentState{
+            .blendEnable = vk::True,
+            // Which color channels should we write to?
+            .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
+            .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+            .colorBlendOp        = vk::BlendOp::eAdd,
+            .srcAlphaBlendFactor = vk::BlendFactor::eOne,
+            .dstAlphaBlendFactor = vk::BlendFactor::eZero,
+            .alphaBlendOp        = vk::BlendOp::eAdd,
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+              vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+          },
+        },
+        .logicOpEnable = false
+      },
       .fragmentShaderOutput =
         {
           .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
-          .depthAttachmentFormat = vk::Format::eD16Unorm
+          .depthAttachmentFormat = vk::Format::eD32Sfloat
         }
     });
 }
@@ -182,10 +203,10 @@ void SimpleShadowmapRender::DrawParticlesCmd(VkCommandBuffer a_cmdBuff, const fl
   pushConstParticles.projView = a_wvp;
   for (uint32_t i = 0; i < pushConstComputeSpawn.startPos; ++i)
   {
-    pushConstParticles.index = i;
+    pushConstParticles.rightAndIndex.w = i;
     vkCmdPushConstants(a_cmdBuff, a_pipelineLayout,
       stageFlags, 0, sizeof(pushConstParticles), &pushConstParticles);
-    vkCmdDraw(a_cmdBuff, 1, 1, 0, 0);
+    vkCmdDraw(a_cmdBuff, 6, 1, 0, 0);
   }
 }
 
@@ -198,9 +219,34 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
   VK_CHECK_RESULT(vkBeginCommandBuffer(a_cmdBuff, &beginInfo));
+  double curTime = m_uniforms.time;
+  static double lastTime = curTime;
 
+  int ni = -1;
   // compute spawn particles
+  if (curTime - lastTime > 0.2)
   {
+     VkBufferMemoryBarrier2 memoryBarrier = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+      .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
+      .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
+      .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
+      .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR,
+      .srcQueueFamilyIndex = m_context->getQueueFamilyIdx(),
+      .dstQueueFamilyIndex = m_context->getQueueFamilyIdx(),
+      .buffer = particles.get(),
+      .offset = 0,
+      .size = nParticles * sizeof(Particle)};
+
+    VkDependencyInfo dependencyInfo = {
+      .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .bufferMemoryBarrierCount = 1,              // memoryBarrierCount
+      .pBufferMemoryBarriers = &memoryBarrier, // pMemoryBarriers
+    };
+
+    vkCmdPipelineBarrier2(a_cmdBuff, &dependencyInfo); 
+
+    lastTime = curTime;
     auto simpleComputeInfo = etna::get_shader_program("spawn_particles");
 
     auto set = etna::create_descriptor_set(simpleComputeInfo.getDescriptorLayoutId(0), a_cmdBuff,
@@ -216,15 +262,22 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     uint16_t nNeedSpawn = 1;
     pushConstComputeSpawn.maxParticles = nParticles;
-    pushConstComputeSpawn.startPos = (pushConstComputeSpawn.startPos + nNeedSpawn);
-    assert(pushConstComputeSpawn.startPos < nParticles);
+    assert(pushConstComputeSpawn.startPos + nNeedSpawn < nParticles);
     vkCmdPushConstants(a_cmdBuff, m_spawnParticles.getVkPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstComputeSpawn), &pushConstComputeSpawn);
 
     etna::flush_barriers(a_cmdBuff);
 
     vkCmdDispatch(a_cmdBuff, nNeedSpawn, 1, 1);
-  }
+    pushConstComputeSpawn.startPos = (pushConstComputeSpawn.startPos + nNeedSpawn);
+    // std::cout << "spawn\n";
+    // int i = pushConstComputeSpawn.startPos - 1;
+    // std::cout << m_uboMappedParticles[i].positionAndTimeToLive.x << ',' <<
+    //              m_uboMappedParticles[i].positionAndTimeToLive.y << ',' <<
+    //              m_uboMappedParticles[i].positionAndTimeToLive.z << ',' << 
+    //              m_uboMappedParticles[i].positionAndTimeToLive.w << '\n';
 
+    vkCmdPipelineBarrier2(a_cmdBuff, &dependencyInfo); 
+  }
   // compute physics
   {
     auto simpleComputeInfo = etna::get_shader_program("physics_particles");
@@ -237,24 +290,35 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     VkDescriptorSet vkSet = set.getVkSet();
 
-    vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_spawnParticles.getVkPipeline());
-    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_spawnParticles.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
+    vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_physicsPipeline.getVkPipeline());
+    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_physicsPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
 
     pushConstComputePhysics.dt = m_dt;
-    vkCmdPushConstants(a_cmdBuff, m_spawnParticles.getVkPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstComputePhysics), &pushConstComputePhysics);
+    vkCmdPushConstants(a_cmdBuff, m_physicsPipeline.getVkPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, 
+                       sizeof(pushConstComputePhysics), &pushConstComputePhysics);
 
     etna::flush_barriers(a_cmdBuff);
 
-    vkCmdDispatch(a_cmdBuff, nParticles, 1, 1);
+    vkCmdDispatch(a_cmdBuff, 1, 1, 1);
+    if (ni != -1) {
+       std::cout << m_uboMappedParticles[ni].positionAndTimeToLive.x << ',' <<
+                 m_uboMappedParticles[ni].positionAndTimeToLive.y << ',' <<
+                 m_uboMappedParticles[ni].positionAndTimeToLive.z << ',' << 
+                 m_uboMappedParticles[ni].positionAndTimeToLive.w << '\n';
+    }
   }
 
-  std::sort(m_uboMappedParticles, m_uboMappedParticles + nParticles, 
-    [](const Particle &p1, const Particle &p2) {
-      return p1.velocity.w < p2.velocity.w;
-    });
+  // std::sort(m_uboMappedParticles, m_uboMappedParticles + pushConstComputeSpawn.startPos, 
+  //   [](const Particle &p1, const Particle &p2) {
+  //     return p1.velocity.w < p2.velocity.w;
+  //   });
 
-  uint16_t nAliveParticles = std::lower_bound(m_uboMappedParticles, m_uboMappedParticles + nParticles, 1000000) - m_uboMappedParticles;
-  pushConstComputeSpawn.startPos = nAliveParticles;
+  // uint16_t nAliveParticles = std::lower_bound(m_uboMappedParticles,
+  //            m_uboMappedParticles + pushConstComputeSpawn.startPos, 1000000, 
+  //             [](const Particle &p1, const Particle &p2) {
+  //             return p1.velocity.w < p2.velocity.w; // depth
+  //           }) - m_uboMappedParticles;
+  // pushConstComputeSpawn.startPos = nAliveParticles;
   //// draw scene to shadowmap
   //
   {
@@ -296,8 +360,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
 
     auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
     {
-      etna::Binding {0, constants.genBinding()},
-      etna::Binding {1, particles.genBinding()}
+      etna::Binding {0, particles.genBinding()}
     });
 
     VkDescriptorSet vkSet = set.getVkSet();

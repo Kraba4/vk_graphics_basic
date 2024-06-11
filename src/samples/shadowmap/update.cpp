@@ -45,6 +45,9 @@ void SimpleShadowmapRender::UpdateUniformBuffer(float a_time)
   m_uniforms.lightPos    = m_light.cam.pos; //LiteMath::float3(sinf(a_time), 1.0f, cosf(a_time));
   m_dt = a_time - m_uniforms.time;
   m_uniforms.time        = a_time;
+  const float3 right = m_cam.right();
+  pushConstParticles.rightAndIndex = float4(right.x, right.y, right.z, 0);
+  pushConstParticles.upAndSize = float4(m_cam.up.x, m_cam.up.y, m_cam.up.z, 0.1);
 
   memcpy(m_uboMappedMem, &m_uniforms, sizeof(m_uniforms));
 }
