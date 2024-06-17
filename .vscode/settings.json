@@ -77,6 +77,22 @@
         "variant": "cpp",
         "expected": "cpp",
         "format": "cpp",
-        "rope": "cpp"
+        "rope": "cpp",
+        "csetjmp": "cpp",
+        "csignal": "cpp",
+        "decimal": "cpp",
+        "buffer": "cpp",
+        "executor": "cpp",
+        "internet": "cpp",
+        "io_context": "cpp",
+        "netfwd": "cpp",
+        "propagate_const": "cpp",
+        "socket": "cpp",
+        "timer": "cpp",
+        "slist": "cpp",
+        "future": "cpp",
+        "cfenv": "cpp",
+        "valarray": "cpp",
+        "synchronized_value": "cpp"
     }
 }

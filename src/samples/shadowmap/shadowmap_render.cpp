@@ -42,18 +42,34 @@ void SimpleShadowmapRender::AllocateResources()
     .name = "constants"
   });
   
+  spawnConstants = m_context->createBuffer(etna::Buffer::CreateInfo
+  {
+    .size = sizeof(SpawnParams),
+    .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer,
+    .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+    .name = "spawn_constants"
+  });
+
   particles = m_context->createBuffer(etna::Buffer::CreateInfo
   {
     .size = sizeof(Particle) * nParticles,
-    .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-    .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+    .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer,
+    .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "particles"
+  });
+  particlesParams = m_context->createBuffer(etna::Buffer::CreateInfo
+  {
+    .size = sizeof(float4),
+    .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer,
+    .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+    .name = "particles_params"
   });
   pushConstComputeSpawn.maxParticles = nParticles;
   pushConstComputeSpawn.startPos = 0;
 
   m_uboMappedMem = constants.map();
-  m_uboMappedParticles = reinterpret_cast<Particle*>(particles.map());
+  m_uboMappedMemSpawn = spawnConstants.map();
+  m_uboMappedParticlesParams = reinterpret_cast<float4*>(particlesParams.map());
 }
 
 void SimpleShadowmapRender::LoadScene(const char* path, bool transpose_inst_matrices)
@@ -104,8 +120,9 @@ void SimpleShadowmapRender::loadShaders()
   etna::create_program("simple_material",
     {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple_shadow.frag.spv", VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
   etna::create_program("simple_shadow", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/simple.vert.spv"});
-  etna::create_program("spawn_particles", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/spawn.comp.spv"});
-  etna::create_program("physics_particles", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/physics.comp.spv"});
+  etna::create_program("physics_particles", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/physicsAndSpawn.comp.spv"});
+  etna::create_program("sort_particles", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/sort.comp.spv"});
+  etna::create_program("init_particles", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/init.comp.spv"});
   etna::create_program("particles_material", {VK_GRAPHICS_BASIC_ROOT"/resources/shaders/particles.vert.spv", 
                                             VK_GRAPHICS_BASIC_ROOT"/resources/shaders/particles.frag.spv"});
 }
@@ -138,8 +155,9 @@ void SimpleShadowmapRender::SetupSimplePipeline()
           .depthAttachmentFormat = vk::Format::eD16Unorm
         }
     });
-  m_spawnParticles = pipelineManager.createComputePipeline("spawn_particles", {});
   m_physicsPipeline = pipelineManager.createComputePipeline("physics_particles", {});
+  m_sortPipeline = pipelineManager.createComputePipeline("sort_particles", {});
+  m_initPipeline = pipelineManager.createComputePipeline("init_particles", {});
 
   m_particlesPipeline = pipelineManager.createGraphicsPipeline("particles_material",
     {
@@ -201,12 +219,12 @@ void SimpleShadowmapRender::DrawParticlesCmd(VkCommandBuffer a_cmdBuff, const fl
 {
   VkShaderStageFlags stageFlags = (VK_SHADER_STAGE_VERTEX_BIT);
   pushConstParticles.projView = a_wvp;
-  for (uint32_t i = 0; i < pushConstComputeSpawn.startPos; ++i)
+  for (uint32_t i = 0; i < m_uboMappedParticlesParams->x + 1; ++i)
   {
     pushConstParticles.rightAndIndex.w = i;
     vkCmdPushConstants(a_cmdBuff, a_pipelineLayout,
       stageFlags, 0, sizeof(pushConstParticles), &pushConstParticles);
-    vkCmdDraw(a_cmdBuff, 6, 1, 0, 0);
+    vkCmdDraw(a_cmdBuff, 3, 1, 0, 0);
   }
 }
 
@@ -219,106 +237,101 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
   VK_CHECK_RESULT(vkBeginCommandBuffer(a_cmdBuff, &beginInfo));
-  double curTime = m_uniforms.time;
-  static double lastTime = curTime;
 
-  int ni = -1;
-  // compute spawn particles
-  if (curTime - lastTime > 0.2)
+  //// init particles once
+  //
   {
-     VkBufferMemoryBarrier2 memoryBarrier = {
-      .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-      .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
-      .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
-      .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
-      .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR,
-      .srcQueueFamilyIndex = m_context->getQueueFamilyIdx(),
-      .dstQueueFamilyIndex = m_context->getQueueFamilyIdx(),
-      .buffer = particles.get(),
-      .offset = 0,
-      .size = nParticles * sizeof(Particle)};
+    static bool needInit = true;
+    if (needInit) {
+      auto simpleComputeInfo = etna::get_shader_program("init_particles");
+      auto set = etna::create_descriptor_set(simpleComputeInfo.getDescriptorLayoutId(0), a_cmdBuff,
+        {
+          etna::Binding {0, particles.genBinding()},
+          etna::Binding {1, particlesParams.genBinding()}
+        }
+      );
+      VkDescriptorSet vkSet = set.getVkSet();
 
-    VkDependencyInfo dependencyInfo = {
-      .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-      .bufferMemoryBarrierCount = 1,              // memoryBarrierCount
-      .pBufferMemoryBarriers = &memoryBarrier, // pMemoryBarriers
-    };
+      vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_initPipeline.getVkPipeline());
+      vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_initPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
+      vkCmdDispatch(a_cmdBuff, 1, 1, 1);
 
-    vkCmdPipelineBarrier2(a_cmdBuff, &dependencyInfo); 
-
-    lastTime = curTime;
-    auto simpleComputeInfo = etna::get_shader_program("spawn_particles");
-
-    auto set = etna::create_descriptor_set(simpleComputeInfo.getDescriptorLayoutId(0), a_cmdBuff,
-      {
-        etna::Binding {0, particles.genBinding()}
-      }
-    );
-
-    VkDescriptorSet vkSet = set.getVkSet();
-
-    vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_spawnParticles.getVkPipeline());
-    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_spawnParticles.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
-
-    uint16_t nNeedSpawn = 1;
-    pushConstComputeSpawn.maxParticles = nParticles;
-    assert(pushConstComputeSpawn.startPos + nNeedSpawn < nParticles);
-    vkCmdPushConstants(a_cmdBuff, m_spawnParticles.getVkPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushConstComputeSpawn), &pushConstComputeSpawn);
-
-    etna::flush_barriers(a_cmdBuff);
-
-    vkCmdDispatch(a_cmdBuff, nNeedSpawn, 1, 1);
-    pushConstComputeSpawn.startPos = (pushConstComputeSpawn.startPos + nNeedSpawn);
-    // std::cout << "spawn\n";
-    // int i = pushConstComputeSpawn.startPos - 1;
-    // std::cout << m_uboMappedParticles[i].positionAndTimeToLive.x << ',' <<
-    //              m_uboMappedParticles[i].positionAndTimeToLive.y << ',' <<
-    //              m_uboMappedParticles[i].positionAndTimeToLive.z << ',' << 
-    //              m_uboMappedParticles[i].positionAndTimeToLive.w << '\n';
-
-    vkCmdPipelineBarrier2(a_cmdBuff, &dependencyInfo); 
-  }
-  // compute physics
-  {
-    auto simpleComputeInfo = etna::get_shader_program("physics_particles");
-
-    auto set = etna::create_descriptor_set(simpleComputeInfo.getDescriptorLayoutId(0), a_cmdBuff,
-      {
-        etna::Binding {0, particles.genBinding()}
-      }
-    );
-
-    VkDescriptorSet vkSet = set.getVkSet();
-
-    vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_physicsPipeline.getVkPipeline());
-    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_physicsPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
-
-    pushConstComputePhysics.dt = m_dt;
-    vkCmdPushConstants(a_cmdBuff, m_physicsPipeline.getVkPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, 
-                       sizeof(pushConstComputePhysics), &pushConstComputePhysics);
-
-    etna::flush_barriers(a_cmdBuff);
-
-    vkCmdDispatch(a_cmdBuff, 1, 1, 1);
-    if (ni != -1) {
-       std::cout << m_uboMappedParticles[ni].positionAndTimeToLive.x << ',' <<
-                 m_uboMappedParticles[ni].positionAndTimeToLive.y << ',' <<
-                 m_uboMappedParticles[ni].positionAndTimeToLive.z << ',' << 
-                 m_uboMappedParticles[ni].positionAndTimeToLive.w << '\n';
+      m_dt = 0.1;
+      needInit = false;
     }
   }
 
-  // std::sort(m_uboMappedParticles, m_uboMappedParticles + pushConstComputeSpawn.startPos, 
-  //   [](const Particle &p1, const Particle &p2) {
-  //     return p1.velocity.w < p2.velocity.w;
-  //   });
+  VkBufferMemoryBarrier2 memoryBarrier[2] = {{
+    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+    .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+    .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+    .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+    .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+    .srcQueueFamilyIndex = m_context->getQueueFamilyIdx(),
+    .dstQueueFamilyIndex = m_context->getQueueFamilyIdx(),
+    .buffer = particles.get(),
+    .offset = 0,
+    .size = nParticles * sizeof(Particle)},
+    {
+    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+    .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+    .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+    .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+    .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+    .srcQueueFamilyIndex = m_context->getQueueFamilyIdx(),
+    .dstQueueFamilyIndex = m_context->getQueueFamilyIdx(),
+    .buffer = particlesParams.get(),
+    .offset = 0,
+    .size = sizeof(float4)}};
 
-  // uint16_t nAliveParticles = std::lower_bound(m_uboMappedParticles,
-  //            m_uboMappedParticles + pushConstComputeSpawn.startPos, 1000000, 
-  //             [](const Particle &p1, const Particle &p2) {
-  //             return p1.velocity.w < p2.velocity.w; // depth
-  //           }) - m_uboMappedParticles;
-  // pushConstComputeSpawn.startPos = nAliveParticles;
+  VkDependencyInfo dependencyInfo = {
+    .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+    .bufferMemoryBarrierCount = 2,              
+    .pBufferMemoryBarriers = memoryBarrier, 
+  };
+
+  //// compute physics and spawn
+  //
+  {
+    auto simpleComputeInfo = etna::get_shader_program("physics_particles");
+    auto set = etna::create_descriptor_set(simpleComputeInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, particles.genBinding()},
+        etna::Binding {1, particlesParams.genBinding()},
+        etna::Binding {2, spawnConstants.genBinding()},
+      }
+    );
+    VkDescriptorSet vkSet = set.getVkSet();
+    pushConstComputePhysics.projView = m_worldViewProj;
+    pushConstComputePhysics.dt = m_dt;
+    int needThreads = m_uboMappedParticlesParams->y + 1;
+    int needComputeGroups = needThreads / 64 + ((needThreads % 64) > 0);
+    vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_physicsPipeline.getVkPipeline());
+    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_physicsPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
+    vkCmdPushConstants(a_cmdBuff, m_physicsPipeline.getVkPipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, 
+                       sizeof(pushConstComputePhysics), &pushConstComputePhysics);
+    vkCmdPipelineBarrier2(a_cmdBuff, &dependencyInfo); 
+    vkCmdDispatch(a_cmdBuff, needComputeGroups, 1, 1);
+  }
+
+  //// compute sort
+  //
+  {
+    auto simpleComputeInfo = etna::get_shader_program("sort_particles");
+    auto set = etna::create_descriptor_set(simpleComputeInfo.getDescriptorLayoutId(0), a_cmdBuff,
+      {
+        etna::Binding {0, particles.genBinding()},
+        etna::Binding {1, particlesParams.genBinding()}
+      }
+    );
+    VkDescriptorSet vkSet = set.getVkSet();
+
+    vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_sortPipeline.getVkPipeline());
+    vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_sortPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, NULL);
+    vkCmdPipelineBarrier2(a_cmdBuff, &dependencyInfo);
+    vkCmdDispatch(a_cmdBuff, 1, 1, 1);
+  }
+
   //// draw scene to shadowmap
   //
   {
@@ -332,13 +345,11 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
   //
   {
     auto simpleMaterialInfo = etna::get_shader_program("simple_material");
-
     auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
     {
       etna::Binding {0, constants.genBinding()},
       etna::Binding {1, shadowMap.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)}
     });
-
     VkDescriptorSet vkSet = set.getVkSet();
 
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
@@ -348,21 +359,35 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_basicForwardPipeline.getVkPipeline());
     vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
       m_basicForwardPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
-
     DrawSceneCmd(a_cmdBuff, m_worldViewProj, m_basicForwardPipeline.getVkPipelineLayout());
   }
-
 
   //// draw particles
   //
   {
-    auto simpleMaterialInfo = etna::get_shader_program("particles_material");
+     VkBufferMemoryBarrier2 memoryBarrier2 = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+      .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+      .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+      .dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+      .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+      .srcQueueFamilyIndex = m_context->getQueueFamilyIdx(),
+      .dstQueueFamilyIndex = m_context->getQueueFamilyIdx(),
+      .buffer = particles.get(),
+      .offset = 0,
+      .size = nParticles * sizeof(Particle)};
 
+    VkDependencyInfo dependencyInfo2 = {
+      .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .bufferMemoryBarrierCount = 1,              // memoryBarrierCount
+      .pBufferMemoryBarriers = &memoryBarrier2, // pMemoryBarriers
+    };
+    
+    auto simpleMaterialInfo = etna::get_shader_program("particles_material");
     auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
     {
       etna::Binding {0, particles.genBinding()}
     });
-
     VkDescriptorSet vkSet = set.getVkSet();
 
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
@@ -372,7 +397,7 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_particlesPipeline.getVkPipeline());
     vkCmdBindDescriptorSets(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS,
       m_particlesPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, VK_NULL_HANDLE);
-
+    vkCmdPipelineBarrier2(a_cmdBuff, &dependencyInfo2);
     DrawParticlesCmd(a_cmdBuff, m_worldViewProj, m_particlesPipeline.getVkPipelineLayout());
   }
 

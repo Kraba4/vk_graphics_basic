@@ -27,15 +27,18 @@ out gl_PerVertex { vec4 gl_Position; };
 
 vec2 quad[6] = {vec2(-1,1), vec2(1, 1), vec2(1, -1),
                 vec2(-1,1), vec2(1, -1), vec2(-1,-1)};
+
+vec2 quad2[3] = {vec2(-1, -1), vec2(3, -1), vec2(-1, 3)};
 void main(void)
 {
     const uint index = uint(params.rightAndIndex.w);
-    if (particles[index].positionAndTimeToLive.w <= 0) {
-        gl_Position = vec4(1000, 1000, 1000, 1);
-        return;
+    const vec4 positionAndTimeToLive = particles[index].positionAndTimeToLive;
+    vec3 centerPos = positionAndTimeToLive.xyz;
+    if (positionAndTimeToLive.w <= 0 ||  particles[index].spawner.x > 0) {
+        // gl_Position = vec4(1000, 1000, 1000, 1);
+        centerPos = vec3(1000, 1000, 0);
     }
-    const vec3 centerPos = particles[index].positionAndTimeToLive.xyz;
-    const vec2 corner = quad[gl_VertexIndex];
+    const vec2 corner = quad2[gl_VertexIndex];
     const float size = 0.1;
     const vec3 right = params.rightAndIndex.xyz;
     const vec3 up = params.upAndSize.xyz;

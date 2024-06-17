@@ -50,6 +50,7 @@ void SimpleShadowmapRender::UpdateUniformBuffer(float a_time)
   pushConstParticles.upAndSize = float4(m_cam.up.x, m_cam.up.y, m_cam.up.z, 0.1);
 
   memcpy(m_uboMappedMem, &m_uniforms, sizeof(m_uniforms));
+  memcpy(m_uboMappedMemSpawn, &m_spawnParams, sizeof(m_spawnParams));
 }
 
 void SimpleShadowmapRender::ProcessInput(const AppInput &input)

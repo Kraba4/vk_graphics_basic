@@ -49,8 +49,10 @@ private:
   etna::Image shadowMap;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
+  etna::Buffer spawnConstants;
   etna::Buffer particles;
-  uint16_t nParticles = 512;
+  etna::Buffer particlesParams;
+  uint16_t nParticles = 1024;
 
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
@@ -79,6 +81,7 @@ private:
 
   struct
   {
+    float4x4 projView;
     float dt;
   } pushConstComputePhysics;
 
@@ -93,15 +96,18 @@ private:
   float4x4 m_lightMatrix;    
   float m_dt;
   UniformParams m_uniforms {};
+  SpawnParams m_spawnParams {};
   void* m_uboMappedMem = nullptr;
-  Particle* m_uboMappedParticles = nullptr;
+  void* m_uboMappedMemSpawn = nullptr;
+  float4* m_uboMappedParticlesParams = nullptr;
 
   etna::GraphicsPipeline m_basicForwardPipeline {};
   etna::GraphicsPipeline m_shadowPipeline {};
   etna::GraphicsPipeline m_particlesPipeline {};
-  etna::ComputePipeline m_spawnParticles {};
   etna::ComputePipeline m_physicsPipeline {};
-
+  etna::ComputePipeline m_sortPipeline {};
+  etna::ComputePipeline m_initPipeline {};
+  std::shared_ptr<vk_utils::ICopyEngine> m_pCopyHelper;
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   VulkanSwapChain m_swapchain;
 
