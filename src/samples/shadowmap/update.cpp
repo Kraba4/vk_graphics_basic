@@ -51,6 +51,7 @@ void SimpleShadowmapRender::UpdateUniformBuffer(float a_time)
 
   memcpy(m_uboMappedMem, &m_uniforms, sizeof(m_uniforms));
   memcpy(m_uboMappedMemSpawn, &m_spawnParams, sizeof(m_spawnParams));
+  memcpy(m_uboMappedMemColor, &constColors, sizeof(constColors));
 }
 
 void SimpleShadowmapRender::ProcessInput(const AppInput &input)

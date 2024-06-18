@@ -33,6 +33,22 @@ void SimpleShadowmapRender::AllocateResources()
     .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled
   });
 
+  normals = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width, m_height, 1},
+    .name = "normals",
+    .format = vk::Format::eR16G16B16A16Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
+  });
+
+  positions = m_context->createImage(etna::Image::CreateInfo
+  {
+    .extent = vk::Extent3D{m_width, m_height, 1},
+    .name = "positions",
+    .format = vk::Format::eR16G16B16A16Sfloat,
+    .imageUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment
+  });
+
   defaultSampler = etna::Sampler(etna::Sampler::CreateInfo{.name = "default_sampler"});
   constants = m_context->createBuffer(etna::Buffer::CreateInfo
   {
@@ -64,11 +80,19 @@ void SimpleShadowmapRender::AllocateResources()
     .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
     .name = "particles_params"
   });
+  colorParams = m_context->createBuffer(etna::Buffer::CreateInfo
+  {
+    .size = sizeof(ColorParams),
+    .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer,
+    .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
+    .name = "color_params"
+  });
   pushConstComputeSpawn.maxParticles = nParticles;
   pushConstComputeSpawn.startPos = 0;
 
   m_uboMappedMem = constants.map();
   m_uboMappedMemSpawn = spawnConstants.map();
+  m_uboMappedMemColor = colorParams.map();
   m_uboMappedParticlesParams = reinterpret_cast<float4*>(particlesParams.map());
 }
 
@@ -141,9 +165,34 @@ void SimpleShadowmapRender::SetupSimplePipeline()
   m_basicForwardPipeline = pipelineManager.createGraphicsPipeline("simple_material",
     {
       .vertexShaderInput = sceneVertexInputDesc,
+      .blendingConfig = {
+        .attachments = {
+          vk::PipelineColorBlendAttachmentState{
+            .blendEnable = vk::False,
+            // Which color channels should we write to?
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+              vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+          },
+           vk::PipelineColorBlendAttachmentState{
+            .blendEnable = vk::False,
+            // Which color channels should we write to?
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+              vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+          },
+           vk::PipelineColorBlendAttachmentState{
+            .blendEnable = vk::False,
+            // Which color channels should we write to?
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+              vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+          },
+        },
+        .logicOp = vk::LogicOp::eNoOp
+      },
       .fragmentShaderOutput =
         {
-          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat())},
+          .colorAttachmentFormats = {static_cast<vk::Format>(m_swapchain.GetFormat()),
+                                    vk::Format::eR16G16B16A16Sfloat,
+                                    vk::Format::eR16G16B16A16Sfloat},
           .depthAttachmentFormat = vk::Format::eD32Sfloat
         }
     });
@@ -303,7 +352,9 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     );
     VkDescriptorSet vkSet = set.getVkSet();
     pushConstComputePhysics.projView = m_worldViewProj;
-    pushConstComputePhysics.dt = m_dt;
+    pushConstComputePhysics.dt_step.x = m_dt;
+    pushConstComputePhysics.dt_step.y = m_step;
+    m_step = (m_step + 1) % 88;
     int needThreads = m_uboMappedParticlesParams->y + 1;
     int needComputeGroups = needThreads / 64 + ((needThreads % 64) > 0);
     vkCmdBindPipeline      (a_cmdBuff, VK_PIPELINE_BIND_POINT_COMPUTE, m_physicsPipeline.getVkPipeline());
@@ -353,7 +404,8 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     VkDescriptorSet vkSet = set.getVkSet();
 
     etna::RenderTargetState renderTargets(a_cmdBuff, {0, 0, m_width, m_height},
-      {{.image = a_targetImage, .view = a_targetImageView}},
+      {{.image = a_targetImage, .view = a_targetImageView},
+       {normals.get(), normals.getView({})}, {positions.get(), positions.getView({})}},
       {.image = mainViewDepth.get(), .view = mainViewDepth.getView({})});
 
     vkCmdBindPipeline(a_cmdBuff, VK_PIPELINE_BIND_POINT_GRAPHICS, m_basicForwardPipeline.getVkPipeline());
@@ -386,7 +438,10 @@ void SimpleShadowmapRender::BuildCommandBufferSimple(VkCommandBuffer a_cmdBuff, 
     auto simpleMaterialInfo = etna::get_shader_program("particles_material");
     auto set = etna::create_descriptor_set(simpleMaterialInfo.getDescriptorLayoutId(0), a_cmdBuff,
     {
-      etna::Binding {0, particles.genBinding()}
+      etna::Binding {0, particles.genBinding()},
+      etna::Binding {1, normals.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+      etna::Binding {2, positions.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+      etna::Binding {3, colorParams.genBinding()},
     });
     VkDescriptorSet vkSet = set.getVkSet();
 

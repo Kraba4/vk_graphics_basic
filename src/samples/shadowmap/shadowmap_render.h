@@ -47,13 +47,16 @@ private:
   etna::GlobalContext* m_context;
   etna::Image mainViewDepth;
   etna::Image shadowMap;
+  etna::Image normals;
+  etna::Image positions;
   etna::Sampler defaultSampler;
   etna::Buffer constants;
   etna::Buffer spawnConstants;
   etna::Buffer particles;
   etna::Buffer particlesParams;
+  etna::Buffer colorParams;
   uint16_t nParticles = 1024;
-
+  uint8_t m_step = 0;
   VkCommandPool    m_commandPool    = VK_NULL_HANDLE;
 
   struct
@@ -82,7 +85,7 @@ private:
   struct
   {
     float4x4 projView;
-    float dt;
+    float4 dt_step;
   } pushConstComputePhysics;
 
   struct
@@ -92,6 +95,8 @@ private:
     float4 upAndSize;
   } pushConstParticles;
 
+  ColorParams constColors;
+
   float4x4 m_worldViewProj;
   float4x4 m_lightMatrix;    
   float m_dt;
@@ -99,6 +104,7 @@ private:
   SpawnParams m_spawnParams {};
   void* m_uboMappedMem = nullptr;
   void* m_uboMappedMemSpawn = nullptr;
+  void* m_uboMappedMemColor = nullptr;
   float4* m_uboMappedParticlesParams = nullptr;
 
   etna::GraphicsPipeline m_basicForwardPipeline {};

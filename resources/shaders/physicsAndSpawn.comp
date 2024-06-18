@@ -24,17 +24,64 @@ layout(binding = 2) uniform AppData
 
 layout( push_constant ) uniform params {
    mat4 mProjView;
-   float dt;
+   vec4 dt_step;
 } PushConstant;
 
-Particle spawn(int type, vec3 position) {
+vec3 randomVelocities[] = {
+    vec3(1, 5, 0.1),
+    vec3(-2, 5, 0.3),
+    vec3(2, 5, 0.5),
+    vec3(-2, 5, 0.7),
+    vec3(0.1, 5, 0.9),
+    vec3(-0.3, 5, 1.1),
+    vec3(-2, 5, 1.3),
+    vec3(2, 5, 1.5),
+};
+const float PI = 3.1415926;
+const float circlePart = 2.0 * PI / 8.0;
+const vec3 randomVelocities2[] = {
+    vec3(cos(circlePart), sin(circlePart), 0),
+    vec3(cos(circlePart * 2.0), sin(circlePart * 2.0), 0),
+    vec3(cos(circlePart * 3.0), sin(circlePart * 3.0), 0),
+    vec3(cos(circlePart * 4.0), sin(circlePart * 4.0), 0),
+    vec3(cos(circlePart * 5.0), sin(circlePart * 5.0), 0),
+    vec3(cos(circlePart * 6.0), sin(circlePart * 6.0), 0),
+    vec3(cos(circlePart * 7.0), sin(circlePart * 7.0), 0),
+    vec3(cos(circlePart * 8.0), sin(circlePart * 8.0), 0),
+};
+
+float randomColors[] = {
+    0, 0, 0, 0, 0, 0, 0, 0,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    0, 1, 0, 1, 0, 1, 0, 1,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    2, 2, 2, 2, 2, 2, 2, 2,
+    1, 0, 1, 0, 1, 0, 1, 0,
+    2, 1, 2, 1, 2, 1, 2, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    0, 2, 0, 2, 0, 2, 0, 2,
+    2, 2, 2, 2, 2, 2, 2, 2,
+    0, 0, 0, 0, 0, 0, 0, 0,
+};
+Particle spawn(int type, vec3 position, vec2 countAndColor) {
     Particle newParticle;
+    int random_seed = int(PushConstant.dt_step.y);
+    int random_seed8 = int(mod(PushConstant.dt_step.y, 8));
     if (type == 1) {
         newParticle.positionAndTimeToLive = vec4(position, 4);
         vec4 proj = PushConstant.mProjView * vec4(position, 1.0f);
-        newParticle.velocity = vec4(1,0,0, proj.z);
+        newParticle.velocity = vec4(randomVelocities[random_seed8], proj.z);
         newParticle.spawner = vec4(0);
-    } 
+    } else if (type / 200 == 1) {
+        newParticle.positionAndTimeToLive = vec4(position, type - 200);
+        newParticle.velocity = vec4(randomVelocities[random_seed8], -10000);
+        newParticle.spawner = vec4(3,-4, 0, 8);
+    } else if (type == 3) {
+        newParticle.positionAndTimeToLive = vec4(position, 3);
+        vec4 proj = PushConstant.mProjView * vec4(position, 1.0f);
+        newParticle.velocity = vec4(randomVelocities2[random_seed8] * 2, proj.z);
+        newParticle.spawner = vec4(0, 0, -1, randomColors[int(countAndColor.y * 8 + countAndColor.x)]);
+    }
     return newParticle;
 }
 
@@ -42,7 +89,7 @@ void main()
 {
     const int nAlive    = int(aliveBound_spawnerBound.y);
     const int nSpawners = int(aliveBound_spawnerBound.y - aliveBound_spawnerBound.x);
-    const float dt      = PushConstant.dt;
+    const float dt      = PushConstant.dt_step.x;
     if (gl_GlobalInvocationID.x > nAlive) {
         return;
     }
@@ -54,18 +101,52 @@ void main()
         vec3 position = local_particle.positionAndTimeToLive.xyz;
         if (spawnType > 0) {
             // local_particle.velocity = vec4(velocity, -100000);
+            if (spawnType != 1) {
+                vec3 velocity = local_particle.velocity.xyz;
+                float speed = 0.1;
+                velocity += vec3(0, -1, 0) * dt;
+                position += speed * velocity * dt;
+                if (position.x > 1.22) {
+                    velocity += vec3(-25, 0, 0) * dt;
+                }
+                if (position.x < -1.22) {
+                    velocity += vec3(25, 0, 0) * dt;
+                }
+                local_particle.positionAndTimeToLive.xyz = position;
+                local_particle.velocity.xyz = velocity;
+            }
             local_particle.spawner.y += dt;
-            local_particle.spawner.z = Params.time.x;
-            if (local_particle.spawner.y > local_particle.spawner.z && (local_particle.spawner.w > 0 || local_particle.spawner.w <= -2)) {
+            if (spawnType == 1) {
+                local_particle.spawner.z = Params.time.x;
+                local_particle.positionAndTimeToLive.x = Params.time.y;
+            }
+            if (local_particle.spawner.y >= local_particle.spawner.z && 
+                (local_particle.spawner.w > 0 || local_particle.spawner.w <= -2)) {
                 local_particle.spawner.y = 0;
                 local_particle.spawner.w -= 1;
-                particles[gl_GlobalInvocationID.x + nSpawners] = spawn(spawnType, position);
+                if (gl_GlobalInvocationID.x + 2 * nSpawners < 1024) {
+                    particles[gl_GlobalInvocationID.x + nSpawners] = spawn(spawnType, position, vec2(local_particle.spawner.w, timeToLive));
+                }
+                int random_seed = int(PushConstant.dt_step.y / 8);
+                if (spawnType == 1 && gl_GlobalInvocationID.x + 2 * nSpawners < 1024) {
+                    particles[gl_GlobalInvocationID.x + 2 * nSpawners] = spawn(200 + random_seed, position,  vec2(local_particle.spawner.w, timeToLive));
+                }
+                if (local_particle.spawner.w == 0) {
+                    local_particle.positionAndTimeToLive.w = -1;
+                    local_particle.velocity.w = -20000;
+                }
             }
         } else {
             vec3 velocity = local_particle.velocity.xyz;
-            float speed = 0.4;
-            velocity += 8.0 * vec3(0, 1, 0) * dt;
-            position += speed * normalize(velocity) * dt;
+            float speed = 0.1;
+            velocity += vec3(0, -1, 0) * dt;
+            position += speed * velocity * dt;
+            if (position.x > 1.22) {
+                velocity += vec3(-25, 0, 0) * dt;
+            }
+            if (position.x < -1.22) {
+                velocity += vec3(25, 0, 0) * dt ;
+            }
             timeToLive -= dt;
             local_particle.positionAndTimeToLive = vec4(position, timeToLive);
             vec4 proj = PushConstant.mProjView * vec4(position, 1.0f);

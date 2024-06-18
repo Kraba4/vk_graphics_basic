@@ -21,14 +21,10 @@ void main()
     Particle particle;
     if (gl_LocalInvocationIndex == 0) {
         aliveBound_spawnerBound = vec4(-1, 1, 0, 0);
-        particle.positionAndTimeToLive = vec4(-1,-0.4, 0, 4);
+        particle.positionAndTimeToLive = vec4(0.5,-0.4, 0.6, 4);
         particle.velocity = vec4(0,0,0, -10000);
         particle.spawner = vec4(1, 0, 0.2, -3);
-    } else if (gl_LocalInvocationIndex == 1) {
-        particle.positionAndTimeToLive = vec4(1,-0.4, 0, 4);
-        particle.velocity = vec4(0,0,0, -10000);
-        particle.spawner = vec4(1, 0, 0.2, -3);
-    } else {
+    }  else {
         particle.positionAndTimeToLive = vec4(-1);
         particle.velocity = vec4(-20000);
         particle.spawner = vec4(0);

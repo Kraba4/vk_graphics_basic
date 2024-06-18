@@ -56,6 +56,13 @@ struct SpawnParams
   shader_vec4  time;
 };
 
+struct ColorParams
+{
+  shader_vec4  color1;
+  shader_vec4  color2;
+  shader_vec4  color3;
+};
+
 struct Particle
 {
   shader_vec4 positionAndTimeToLive;

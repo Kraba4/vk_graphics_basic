@@ -20,7 +20,9 @@ layout(push_constant) uniform params_t
 
 layout (location = 0 ) out VS_OUT
 {
-    vec2 texCoord;
+    vec4 pos;
+    vec4 texCoord;
+    vec4 viewportCoord;
 } vOut;
 
 out gl_PerVertex { vec4 gl_Position; };
@@ -39,11 +41,15 @@ void main(void)
         centerPos = vec3(1000, 1000, 0);
     }
     const vec2 corner = quad2[gl_VertexIndex];
-    const float size = 0.1;
+    float size =  particles[index].spawner.z == -1 ? 0.06  - particles[index].spawner.w * 0.02: 0.02;
+    size *= 2.0;
     const vec3 right = params.rightAndIndex.xyz;
     const vec3 up = params.upAndSize.xyz;
     vec3 pos = centerPos + size * (corner.x * right + corner.y * up);
-    vOut.texCoord = corner * 0.5 + 0.5;
-
+    vOut.texCoord.xy = corner * 0.5 + 0.5;
+    vOut.texCoord.z = particles[index].spawner.z == -1 ? particles[index].spawner.w : 2;
     gl_Position   = params.mProjView * vec4(pos, 1.0);
+    vec3 ndc = gl_Position.xyz / gl_Position.w; 
+    vec2 viewportCoord = ndc.xy * 0.5 + 0.5; 
+    vOut.viewportCoord = vec4(viewportCoord, 0, 0);
 }

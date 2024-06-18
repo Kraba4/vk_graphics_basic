@@ -6,7 +6,10 @@
 SimpleShadowmapRender::SimpleShadowmapRender(uint32_t a_width, uint32_t a_height) : m_width(a_width), m_height(a_height)
 {
   m_uniforms.baseColor = LiteMath::float3(0.9f, 0.92f, 1.0f);
-  m_spawnParams.time = float4(1, 0, 0, 0);
+  m_spawnParams.time = float4(2, 0, 0, 0);
+  constColors.color1 = float4(0.2627, 0.0, 0.9922, 0);
+  constColors.color2 = float4(0.051, 0.8118, 1.0, 0);
+  constColors.color3 = float4(1, 0.9922, 1.0, 0);
 }
 
 void SimpleShadowmapRender::InitVulkan(const char** a_instanceExtensions, uint32_t a_instanceExtensionsCount, uint32_t)

@@ -5,6 +5,8 @@
 #include "common.h"
 
 layout(location = 0) out vec4 out_fragColor;
+layout(location = 1) out vec4 out_normals;
+layout(location = 2) out vec4 out_positions;
 
 layout (location = 0 ) in VS_OUT
 {
@@ -39,4 +41,6 @@ void main()
   vec3 lightDir   = normalize(Params.lightPos - surf.wPos);
   vec4 lightColor = max(dot(surf.wNorm, lightDir), 0.0f) * lightColor1;
   out_fragColor   = (lightColor*shadow + vec4(0.1f)) * vec4(Params.baseColor, 1.0f);
+  out_normals = vec4(surf.wNorm, 1.0);
+  out_positions = vec4(surf.wPos, 1.0);
 }
